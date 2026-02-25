@@ -22,6 +22,10 @@ export default function Me() {
   const [editingName, setEditingName] = useState(false);
   const [nameVal, setNameVal] = useState('');
   const [savingName, setSavingName] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordMsg, setPasswordMsg] = useState({ text: '', error: false });
 
   useEffect(() => {
     if (!loading && !profile) router.replace('/');
@@ -74,8 +78,30 @@ export default function Me() {
     await supabase.from('profiles').update({ full_name: nameVal.trim() }).eq('id', realProfile?.id || profile.id);
     setSavingName(false);
     setEditingName(false);
-    // Refresh page to update profile context
     router.replace(router.asPath);
+  }
+
+  async function changePassword() {
+    if (!newPassword.trim()) return;
+    if (newPassword !== confirmPassword) {
+      setPasswordMsg({ text: 'Passwords do not match.', error: true });
+      return;
+    }
+    if (newPassword.length < 6) {
+      setPasswordMsg({ text: 'Password must be at least 6 characters.', error: true });
+      return;
+    }
+    setChangingPassword(true);
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    setChangingPassword(false);
+    if (error) {
+      setPasswordMsg({ text: 'Could not update password. Try signing out and back in first.', error: true });
+    } else {
+      setNewPassword('');
+      setConfirmPassword('');
+      setPasswordMsg({ text: '✓ Password updated successfully!', error: false });
+      setTimeout(() => setPasswordMsg({ text: '', error: false }), 3000);
+    }
   }
 
   async function handleSignOut() {
@@ -109,14 +135,9 @@ export default function Me() {
         <div style={{ flex: 1 }}>
           {editingName ? (
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <input
-                type="text"
-                value={nameVal}
-                onChange={e => setNameVal(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && saveName()}
-                autoFocus
-                style={{ fontSize: '1rem', fontWeight: 700, flex: 1 }}
-              />
+              <input type="text" value={nameVal} onChange={e => setNameVal(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && saveName()} autoFocus
+                style={{ fontSize: '1rem', fontWeight: 700, flex: 1 }} />
               <button className="btn btn-primary" style={{ padding: '0.3rem 0.7rem', fontSize: '0.8rem' }} onClick={saveName} disabled={savingName}>
                 {savingName ? '…' : 'Save'}
               </button>
@@ -137,7 +158,7 @@ export default function Me() {
       {/* Tab switcher */}
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
         <button onClick={() => setTab('alerts')} className={`btn ${tab === 'alerts' ? 'btn-primary' : 'btn-ghost'}`}
-          style={{ flex: 1, padding: '0.5rem', fontSize: '0.85rem', position: 'relative' }}>
+          style={{ flex: 1, padding: '0.5rem', fontSize: '0.85rem' }}>
           🔔 Alerts
           {unreadCount > 0 && (
             <span style={{ marginLeft: '0.4rem', background: tab === 'alerts' ? '#fff' : 'var(--accent)', color: tab === 'alerts' ? 'var(--accent)' : '#fff', borderRadius: '1rem', padding: '0.05rem 0.45rem', fontSize: '0.72rem', fontWeight: 800 }}>
@@ -176,7 +197,7 @@ export default function Me() {
       {/* PROFILE TAB */}
       {tab === 'profile' && (
         <>
-          {/* Availability link — everyone */}
+          {/* Availability */}
           <div className="card" style={{ marginBottom: '1rem' }}>
             <div style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: '0.6rem' }}>
               My Availability
@@ -190,7 +211,34 @@ export default function Me() {
             </button>
           </div>
 
-          {/* Staff View Mode toggle — manager only */}
+          {/* Change Password — everyone */}
+          <div className="card" style={{ marginBottom: '1rem' }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: '0.8rem' }}>
+              Change Password
+            </div>
+            <div className="form-group">
+              <label>New Password</label>
+              <input type="password" placeholder="Min 6 characters" value={newPassword}
+                onChange={e => setNewPassword(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label>Confirm Password</label>
+              <input type="password" placeholder="Repeat new password" value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && changePassword()} />
+            </div>
+            {passwordMsg.text && (
+              <p style={{ fontSize: '0.82rem', color: passwordMsg.error ? 'var(--danger)' : 'var(--accent)', marginBottom: '0.6rem' }}>
+                {passwordMsg.text}
+              </p>
+            )}
+            <button className="btn btn-primary btn-full" onClick={changePassword}
+              disabled={!newPassword || !confirmPassword || changingPassword}>
+              {changingPassword ? 'Updating…' : 'Update Password'}
+            </button>
+          </div>
+
+          {/* Staff View Mode — manager only */}
           {isReallyManager && (
             <div className="card" style={{ marginBottom: '1rem' }}>
               <div style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: '0.6rem' }}>
@@ -207,7 +255,7 @@ export default function Me() {
             </div>
           )}
 
-          {/* Shift preference — staff only (or manager in staff view) */}
+          {/* Shift preference — staff only */}
           {(!isReallyManager || staffViewMode) && (
             <div className="card" style={{ marginBottom: '1rem' }}>
               <div style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: '0.8rem' }}>
