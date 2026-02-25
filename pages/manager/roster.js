@@ -29,7 +29,8 @@ export default function ManagerRoster() {
   async function fetchShifts() {
     const start = format(startOfMonth(currentMonth), 'yyyy-MM-dd');
     const end = format(endOfMonth(currentMonth), 'yyyy-MM-dd');
-    const { data, error } = await supabase.from('shifts').select('*, profiles(full_name)')
+    const { data, error } = await supabase.from('shifts')
+      .select('*, staff:profiles!shifts_staff_id_fkey(full_name)')
       .gte('date', start).lte('date', end);
     console.log('shifts fetched:', data, 'error:', error);
     setShifts(data || []);
@@ -137,7 +138,7 @@ export default function ManagerRoster() {
             <div key={shift.id} className="shift-item">
               <div className="shift-time mono">{shift.start_time.slice(0,5)}–{shift.end_time.slice(0,5)}</div>
               <div className="shift-info">
-                <div className="shift-name">{shift.profiles?.full_name}</div>
+                <div className="shift-name">{shift.staff?.full_name}</div>
                 <div className="shift-role">{shift.title || 'Shift'}</div>
               </div>
               <button onClick={() => deleteShift(shift.id, shift.staff_id)} style={{ background: 'none', color: 'var(--danger)', fontSize: '1.2rem', padding: '0.2rem 0.4rem' }}>×</button>
