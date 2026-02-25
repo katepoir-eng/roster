@@ -17,8 +17,11 @@ export default function Me() {
   const [notifications, setNotifications] = useState([]);
   const [interest, setInterest] = useState(null);
   const [savingInterest, setSavingInterest] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [tab, setTab] = useState('alerts'); // 'alerts' | 'profile'
+  const [savedInterest, setSavedInterest] = useState(false);
+  const [tab, setTab] = useState('alerts');
+  const [editingName, setEditingName] = useState(false);
+  const [nameVal, setNameVal] = useState('');
+  const [savingName, setSavingName] = useState(false);
 
   useEffect(() => {
     if (!loading && !profile) router.replace('/');
@@ -28,6 +31,7 @@ export default function Me() {
     if (profile) {
       fetchNotifications();
       setInterest(profile.interest_level || 'good');
+      setNameVal(profile.full_name || '');
     }
   }, [profile]);
 
@@ -60,8 +64,18 @@ export default function Me() {
     }
     setInterest(val);
     setSavingInterest(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    setSavedInterest(true);
+    setTimeout(() => setSavedInterest(false), 2000);
+  }
+
+  async function saveName() {
+    if (!nameVal.trim() || nameVal.trim() === profile.full_name) { setEditingName(false); return; }
+    setSavingName(true);
+    await supabase.from('profiles').update({ full_name: nameVal.trim() }).eq('id', realProfile?.id || profile.id);
+    setSavingName(false);
+    setEditingName(false);
+    // Refresh page to update profile context
+    router.replace(router.asPath);
   }
 
   async function handleSignOut() {
@@ -92,8 +106,28 @@ export default function Me() {
         }}>
           {profile.full_name.charAt(0).toUpperCase()}
         </div>
-        <div>
-          <div style={{ fontWeight: 800, fontSize: '1.2rem' }}>{profile.full_name}</div>
+        <div style={{ flex: 1 }}>
+          {editingName ? (
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <input
+                type="text"
+                value={nameVal}
+                onChange={e => setNameVal(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && saveName()}
+                autoFocus
+                style={{ fontSize: '1rem', fontWeight: 700, flex: 1 }}
+              />
+              <button className="btn btn-primary" style={{ padding: '0.3rem 0.7rem', fontSize: '0.8rem' }} onClick={saveName} disabled={savingName}>
+                {savingName ? '…' : 'Save'}
+              </button>
+              <button className="btn btn-ghost" style={{ padding: '0.3rem 0.7rem', fontSize: '0.8rem' }} onClick={() => setEditingName(false)}>✕</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <div style={{ fontWeight: 800, fontSize: '1.2rem' }}>{profile.full_name}</div>
+              <button onClick={() => setEditingName(true)} style={{ background: 'none', color: 'var(--text-dim)', fontSize: '0.8rem', padding: '0.1rem 0.3rem' }}>✏️</button>
+            </div>
+          )}
           <div style={{ color: 'var(--text-dim)', fontSize: '0.85rem' }}>
             {isReallyManager ? '⭐ Manager' : '👤 Staff'}
           </div>
@@ -102,11 +136,8 @@ export default function Me() {
 
       {/* Tab switcher */}
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-        <button
-          onClick={() => setTab('alerts')}
-          className={`btn ${tab === 'alerts' ? 'btn-primary' : 'btn-ghost'}`}
-          style={{ flex: 1, padding: '0.5rem', fontSize: '0.85rem', position: 'relative' }}
-        >
+        <button onClick={() => setTab('alerts')} className={`btn ${tab === 'alerts' ? 'btn-primary' : 'btn-ghost'}`}
+          style={{ flex: 1, padding: '0.5rem', fontSize: '0.85rem', position: 'relative' }}>
           🔔 Alerts
           {unreadCount > 0 && (
             <span style={{ marginLeft: '0.4rem', background: tab === 'alerts' ? '#fff' : 'var(--accent)', color: tab === 'alerts' ? 'var(--accent)' : '#fff', borderRadius: '1rem', padding: '0.05rem 0.45rem', fontSize: '0.72rem', fontWeight: 800 }}>
@@ -114,11 +145,8 @@ export default function Me() {
             </span>
           )}
         </button>
-        <button
-          onClick={() => setTab('profile')}
-          className={`btn ${tab === 'profile' ? 'btn-primary' : 'btn-ghost'}`}
-          style={{ flex: 1, padding: '0.5rem', fontSize: '0.85rem' }}
-        >
+        <button onClick={() => setTab('profile')} className={`btn ${tab === 'profile' ? 'btn-primary' : 'btn-ghost'}`}
+          style={{ flex: 1, padding: '0.5rem', fontSize: '0.85rem' }}>
           👤 Profile
         </button>
       </div>
@@ -148,6 +176,20 @@ export default function Me() {
       {/* PROFILE TAB */}
       {tab === 'profile' && (
         <>
+          {/* Availability link — everyone */}
+          <div className="card" style={{ marginBottom: '1rem' }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: '0.6rem' }}>
+              My Availability
+            </div>
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-dim)', marginBottom: '0.8rem' }}>
+              Mark dates you're unavailable so the team knows when you're off.
+            </p>
+            <button className="btn btn-ghost btn-full" onClick={() => router.push('/staff/availability')}
+              style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+              📅 Manage Availability
+            </button>
+          </div>
+
           {/* Staff View Mode toggle — manager only */}
           {isReallyManager && (
             <div className="card" style={{ marginBottom: '1rem' }}>
@@ -157,11 +199,9 @@ export default function Me() {
               <p style={{ fontSize: '0.82rem', color: 'var(--text-dim)', marginBottom: '0.8rem' }}>
                 Switch to staff view to see exactly what your team sees.
               </p>
-              <button
-                onClick={toggleStaffView}
+              <button onClick={toggleStaffView}
                 className={staffViewMode ? 'btn btn-primary btn-full' : 'btn btn-ghost btn-full'}
-                style={{ borderColor: staffViewMode ? undefined : 'var(--accent)', color: staffViewMode ? undefined : 'var(--accent)' }}
-              >
+                style={{ borderColor: staffViewMode ? undefined : 'var(--accent)', color: staffViewMode ? undefined : 'var(--accent)' }}>
                 {staffViewMode ? '👁 Currently in Staff View — tap to exit' : '👁 Enter Staff View'}
               </button>
             </div>
@@ -177,10 +217,7 @@ export default function Me() {
                 Let your manager know how you're feeling about your schedule.
               </p>
               {INTEREST_OPTIONS.map(opt => (
-                <button
-                  key={opt.value}
-                  onClick={() => saveInterest(opt.value)}
-                  disabled={savingInterest}
+                <button key={opt.value} onClick={() => saveInterest(opt.value)} disabled={savingInterest}
                   style={{
                     display: 'flex', alignItems: 'center', gap: '0.8rem',
                     width: '100%', padding: '0.75rem 1rem', marginBottom: '0.5rem',
@@ -188,8 +225,7 @@ export default function Me() {
                     borderColor: interest === opt.value ? 'var(--accent)' : 'var(--border)',
                     background: interest === opt.value ? 'var(--accent-dim)' : 'transparent',
                     cursor: 'pointer', textAlign: 'left',
-                  }}
-                >
+                  }}>
                   <span style={{ fontSize: '1.4rem' }}>{opt.emoji}</span>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text)' }}>{opt.label}</div>
@@ -198,7 +234,7 @@ export default function Me() {
                   {interest === opt.value && <span style={{ marginLeft: 'auto', color: 'var(--accent)', fontWeight: 800 }}>✓</span>}
                 </button>
               ))}
-              {saved && <p style={{ fontSize: '0.82rem', color: 'var(--accent)', marginTop: '0.4rem', textAlign: 'center' }}>✓ Preference saved</p>}
+              {savedInterest && <p style={{ fontSize: '0.82rem', color: 'var(--accent)', marginTop: '0.4rem', textAlign: 'center' }}>✓ Preference saved</p>}
             </div>
           )}
 
