@@ -16,13 +16,15 @@ export default function StaffShifts() {
   const [allStaff, setAllStaff] = useState([]);
   const [targetStaff, setTargetStaff] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [latestThread, setLatestThread] = useState(null);
+  const [hasUnread, setHasUnread] = useState(false);
 
   useEffect(() => {
     if (!loading && !profile) router.replace('/');
   }, [profile, loading]);
 
   useEffect(() => {
-    if (profile) { fetchShifts(); fetchStaff(); }
+    if (profile) { fetchShifts(); fetchStaff(); fetchLatestThread(); }
   }, [profile, view]);
 
   async function fetchShifts() {
@@ -42,6 +44,20 @@ export default function StaffShifts() {
     setAllStaff(data || []);
   }
 
+  async function fetchLatestThread() {
+    const { data } = await supabase
+      .from('threads')
+      .select('*, author:profiles!threads_author_id_fkey(full_name)')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+    if (data) {
+      setLatestThread(data);
+      const lastVisit = localStorage.getItem('noticeboard_last_visit') || '1970-01-01';
+      setHasUnread(new Date(data.created_at) > new Date(lastVisit));
+    }
+  }
+
   async function requestSwap() {
     setSubmitting(true);
     const { error } = await supabase.from('swap_requests').insert({
@@ -50,7 +66,6 @@ export default function StaffShifts() {
       target_staff_id: targetStaff || null,
       note: swapNote,
     });
-    // Notify manager(s)
     const { data: managers } = await supabase.from('profiles').select('id').eq('role', 'manager');
     if (managers) {
       await supabase.from('notifications').insert(
@@ -90,6 +105,39 @@ export default function StaffShifts() {
           <h1>{profile.full_name.split(' ')[0]}</h1>
         </div>
       </div>
+
+      {/* Noticeboard preview card */}
+      {latestThread && (
+        <div
+          className="card"
+          onClick={() => router.push('/noticeboard')}
+          style={{ marginBottom: '1rem', cursor: 'pointer', borderColor: hasUnread ? 'var(--accent)' : 'var(--border)', position: 'relative' }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: hasUnread ? 'var(--accent)' : 'var(--text-dim)' }}>
+                💬 Noticeboard
+              </span>
+              {hasUnread && (
+                <span style={{ fontSize: '0.7rem', background: 'var(--accent)', color: '#fff', borderRadius: '1rem', padding: '0.1rem 0.5rem', fontWeight: 700 }}>
+                  New
+                </span>
+              )}
+            </div>
+            <span style={{ fontSize: '0.75rem', color: 'var(--accent)', fontWeight: 600 }}>View all →</span>
+          </div>
+          <div style={{ fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.2rem' }}>
+            {latestThread.author?.full_name} · {format(new Date(latestThread.created_at), 'd MMM')}
+          </div>
+          <p style={{
+            fontSize: '0.85rem', color: 'var(--text-dim)', margin: 0,
+            overflow: 'hidden', display: '-webkit-box',
+            WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+          }}>
+            {latestThread.message}
+          </p>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
         {['upcoming', 'this month'].map(v => (
