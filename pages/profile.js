@@ -54,6 +54,7 @@ export default function Profile() {
       <p style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: '0.75rem', marginTop: '1.5rem' }}>
         RosterApp · Powered by Supabase & Vercel
       </p>
+      <BottomNav />
     </div>
   );
 }
