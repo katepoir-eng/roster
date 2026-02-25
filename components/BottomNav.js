@@ -18,17 +18,16 @@ export default function BottomNav() {
 
     const lastVisit = localStorage.getItem('noticeboard_last_visit') || '1970-01-01';
     supabase.from('threads').select('id', { count: 'exact' })
-      .gt('created_at', lastVisit)
-      .neq('author_id', profile.id)
+      .gt('created_at', lastVisit).neq('author_id', profile.id)
       .then(({ count: tc }) => {
         supabase.from('thread_replies').select('id', { count: 'exact' })
-          .gt('created_at', lastVisit)
-          .neq('author_id', profile.id)
+          .gt('created_at', lastVisit).neq('author_id', profile.id)
           .then(({ count: rc }) => setUnreadThreads((tc || 0) + (rc || 0)));
       });
   }, [profile]);
 
   const isActive = (path) => router.pathname === path;
+  const totalBadge = unread + unreadThreads;
 
   // Staff view mode banner + staff nav
   if (staffViewMode && realProfile?.role === 'manager') {
@@ -55,11 +54,8 @@ export default function BottomNav() {
           <Link href="/noticeboard" className={isActive('/noticeboard') ? 'active' : ''}>
             <ChatIcon /> Board {unreadThreads > 0 && <span className="notif-dot" />}
           </Link>
-          <Link href="/notifications" className={isActive('/notifications') ? 'active' : ''}>
-            <BellIcon /> Alerts {unread > 0 && <span className="notif-dot" />}
-          </Link>
-          <Link href="/profile" className={isActive('/profile') ? 'active' : ''}>
-            <UserIcon /> Me
+          <Link href="/me" className={isActive('/me') ? 'active' : ''}>
+            <MeIcon /> Me {totalBadge > 0 && <span className="notif-dot" />}
           </Link>
         </nav>
       </>
@@ -78,11 +74,11 @@ export default function BottomNav() {
         <Link href="/staff/shifts" className={isActive('/staff/shifts') ? 'active' : ''}>
           <ShiftIcon /> My Shifts
         </Link>
-        <Link href="/noticeboard" className={isActive('/noticeboard') ? 'active' : ''} style={{ position: 'relative' }}>
+        <Link href="/noticeboard" className={isActive('/noticeboard') ? 'active' : ''}>
           <ChatIcon /> Board {unreadThreads > 0 && <span className="notif-dot" />}
         </Link>
-        <Link href="/notifications" className={isActive('/notifications') ? 'active' : ''}>
-          <BellIcon /> Alerts {unread > 0 && <span className="notif-dot" />}
+        <Link href="/me" className={isActive('/me') ? 'active' : ''}>
+          <MeIcon /> Me {totalBadge > 0 && <span className="notif-dot" />}
         </Link>
       </nav>
     );
@@ -96,14 +92,11 @@ export default function BottomNav() {
       <Link href="/staff/availability" className={isActive('/staff/availability') ? 'active' : ''}>
         <CheckIcon /> Availability
       </Link>
-      <Link href="/noticeboard" className={isActive('/noticeboard') ? 'active' : ''} style={{ position: 'relative' }}>
+      <Link href="/noticeboard" className={isActive('/noticeboard') ? 'active' : ''}>
         <ChatIcon /> Board {unreadThreads > 0 && <span className="notif-dot" />}
       </Link>
-      <Link href="/notifications" className={isActive('/notifications') ? 'active' : ''}>
-        <BellIcon /> Alerts {unread > 0 && <span className="notif-dot" />}
-      </Link>
-      <Link href="/profile" className={isActive('/profile') ? 'active' : ''}>
-        <UserIcon /> Me
+      <Link href="/me" className={isActive('/me') ? 'active' : ''}>
+        <MeIcon /> Me {totalBadge > 0 && <span className="notif-dot" />}
       </Link>
     </nav>
   );
@@ -119,24 +112,9 @@ const PeopleIcon = () => (
     <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
   </svg>
 );
-const SwapIcon = () => (
+const ShiftIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M7 16V4m0 0L3 8m4-4l4 4" /><path d="M17 8v12m0 0l4-4m-4 4l-4-4" />
-  </svg>
-);
-const BellIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" />
-  </svg>
-);
-const UserIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
-  </svg>
-);
-const CheckIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <polyline points="9 11 12 14 22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+    <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
   </svg>
 );
 const ChatIcon = () => (
@@ -144,8 +122,13 @@ const ChatIcon = () => (
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
   </svg>
 );
-const ShiftIcon = () => (
+const MeIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+  </svg>
+);
+const CheckIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <polyline points="9 11 12 14 22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
   </svg>
 );
