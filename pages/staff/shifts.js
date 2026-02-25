@@ -3,7 +3,7 @@ import { useRouter } from 'next/router';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
 import BottomNav from '../../components/BottomNav';
-import { format, startOfMonth, endOfMonth, isToday, isFuture, parseISO } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, isSameDay, isToday, isFuture, parseISO, addMonths, subMonths } from 'date-fns';
 
 export default function StaffShifts() {
   const { profile, realProfile, loading } = useAuth();
@@ -19,6 +19,11 @@ export default function StaffShifts() {
   const [latestThread, setLatestThread] = useState(null);
   const [hasUnread, setHasUnread] = useState(false);
 
+  // Team schedule state
+  const [teamMonth, setTeamMonth] = useState(new Date());
+  const [teamSelectedDay, setTeamSelectedDay] = useState(new Date());
+  const [teamShifts, setTeamShifts] = useState([]);
+
   useEffect(() => {
     if (!loading && !profile) router.replace('/');
   }, [profile, loading]);
@@ -27,9 +32,12 @@ export default function StaffShifts() {
     if (profile) { fetchShifts(); fetchStaff(); fetchLatestThread(); }
   }, [profile, view]);
 
+  useEffect(() => {
+    if (profile) fetchTeamShifts();
+  }, [profile, teamMonth]);
+
   async function fetchShifts() {
     const now = new Date();
-    // Use realProfile.id so manager sees their own shifts even in staff view mode
     const userId = realProfile?.id || profile.id;
     let query = supabase.from('shifts').select('*').eq('staff_id', userId).order('date').order('start_time');
     if (view === 'upcoming') query = query.gte('date', format(now, 'yyyy-MM-dd'));
@@ -58,6 +66,16 @@ export default function StaffShifts() {
       const lastVisit = localStorage.getItem('noticeboard_last_visit') || '1970-01-01';
       setHasUnread(new Date(data.created_at) > new Date(lastVisit));
     }
+  }
+
+  async function fetchTeamShifts() {
+    const start = format(startOfMonth(teamMonth), 'yyyy-MM-dd');
+    const end = format(endOfMonth(teamMonth), 'yyyy-MM-dd');
+    const { data } = await supabase.from('shifts')
+      .select('*, staff:profiles!shifts_staff_id_fkey(full_name)')
+      .gte('date', start).lte('date', end)
+      .order('start_time');
+    setTeamShifts(data || []);
   }
 
   async function requestSwap() {
@@ -98,6 +116,13 @@ export default function StaffShifts() {
   if (loading || !profile) return <div className="spinner" />;
 
   const grouped = groupByDate(shifts);
+
+  // Team calendar
+  const teamDays = eachDayOfInterval({ start: startOfMonth(teamMonth), end: endOfMonth(teamMonth) });
+  const teamStartPad = getDay(teamDays[0]);
+  const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+  const selectedDateStr = format(teamSelectedDay, 'yyyy-MM-dd');
+  const teamDayShifts = teamShifts.filter(s => s.date === selectedDateStr);
 
   return (
     <div className="container page-content">
@@ -141,6 +166,7 @@ export default function StaffShifts() {
         </div>
       )}
 
+      {/* My Shifts */}
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
         {['upcoming', 'this month'].map(v => (
           <button key={v} onClick={() => setView(v)}
@@ -179,6 +205,77 @@ export default function StaffShifts() {
         ))
       )}
 
+      {/* ── Team Schedule ── */}
+      <div style={{ marginTop: '2rem', marginBottom: '0.6rem' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>
+          Team Schedule
+        </div>
+      </div>
+
+      {/* Month nav */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.8rem' }}>
+        <button className="btn btn-ghost" style={{ padding: '0.4rem 0.8rem' }} onClick={() => setTeamMonth(subMonths(teamMonth, 1))}>‹</button>
+        <span style={{ fontWeight: 700, fontSize: '1rem' }}>{format(teamMonth, 'MMMM yyyy')}</span>
+        <button className="btn btn-ghost" style={{ padding: '0.4rem 0.8rem' }} onClick={() => setTeamMonth(addMonths(teamMonth, 1))}>›</button>
+      </div>
+
+      {/* Team calendar */}
+      <div className="card" style={{ marginBottom: '1rem' }}>
+        <div className="cal-grid" style={{ marginBottom: '0.4rem' }}>
+          {dayNames.map(d => <div key={d} className="cal-day-header">{d}</div>)}
+        </div>
+        <div className="cal-grid">
+          {Array(teamStartPad).fill(null).map((_, i) => <div key={`pad-${i}`} />)}
+          {teamDays.map(day => {
+            const dateStr = format(day, 'yyyy-MM-dd');
+            const hasShift = teamShifts.some(s => s.date === dateStr);
+            const selected = isSameDay(day, teamSelectedDay);
+            const myShift = teamShifts.some(s => s.date === dateStr && s.staff_id === (realProfile?.id || profile.id));
+            return (
+              <div
+                key={dateStr}
+                className={`cal-day ${isToday(day) ? 'today' : ''} ${hasShift ? 'has-shift' : ''} ${selected ? 'selected' : ''}`}
+                onClick={() => setTeamSelectedDay(day)}
+                style={{ position: 'relative' }}
+              >
+                {format(day, 'd')}
+                {myShift && (
+                  <span style={{ position: 'absolute', bottom: 2, right: 2, width: 4, height: 4, borderRadius: '50%', background: 'var(--accent)', display: 'block' }} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Team day list */}
+      <div style={{ marginBottom: '0.6rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2 style={{ fontWeight: 700, fontSize: '1rem' }}>{format(teamSelectedDay, 'EEEE, d MMMM')}</h2>
+        <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>{teamDayShifts.length} shift{teamDayShifts.length !== 1 ? 's' : ''}</span>
+      </div>
+
+      {teamDayShifts.length === 0 ? (
+        <div className="empty-state" style={{ marginBottom: '1rem' }}>
+          <p>Nobody scheduled this day.</p>
+        </div>
+      ) : (
+        teamDayShifts.map(shift => {
+          const isMe = shift.staff_id === (realProfile?.id || profile.id);
+          return (
+            <div key={shift.id} className="shift-item" style={{ marginBottom: '0.5rem', borderColor: isMe ? 'var(--accent)' : 'var(--border)' }}>
+              <div className="shift-time mono">{shift.start_time.slice(0,5)}–{shift.end_time.slice(0,5)}</div>
+              <div className="shift-info">
+                <div className="shift-name" style={{ color: isMe ? 'var(--accent)' : undefined }}>
+                  {shift.staff?.full_name} {isMe && '(you)'}
+                </div>
+                <div className="shift-role">{shift.title || 'Shift'}</div>
+              </div>
+            </div>
+          );
+        })
+      )}
+
+      {/* Swap modal */}
       {showSwapModal && selectedShift && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowSwapModal(false)}>
           <div className="modal-sheet">
