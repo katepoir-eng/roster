@@ -16,7 +16,7 @@ export default function ManagerRoster() {
   const [upcomingShifts, setUpcomingShifts] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editShift, setEditShift] = useState(null);
-  const [newShift, setNewShift] = useState({ staff_id: '', start_time: '09:00', end_time: '17:00', title: '', notes: '', is_recurring: false });
+  const [newShift, setNewShift] = useState({ staff_id: '', start_time: '08:00', end_time: '17:15', title: '', notes: '', is_recurring: false });
   const [saving, setSaving] = useState(false);
   const [recurringPreview, setRecurringPreview] = useState(null);
 
