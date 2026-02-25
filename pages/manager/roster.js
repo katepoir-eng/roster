@@ -63,11 +63,11 @@ export default function ManagerRoster() {
   async function deleteShift(id, staffId) {
     if (!confirm('Delete this shift?')) return;
     await supabase.from('shifts').delete().eq('id', id);
-    await supabase.from('notifications').insert({
+    supabase.from('notifications').insert({
       user_id: staffId,
       title: 'Shift removed',
       message: `A shift on ${format(selectedDay, 'EEE d MMM')} has been removed.`,
-    });
+    }).then(() => {});
     fetchShifts();
   }
 
