@@ -8,12 +8,25 @@ export default function BottomNav() {
   const router = useRouter();
   const { profile } = useAuth();
   const [unread, setUnread] = useState(0);
+  const [unreadThreads, setUnreadThreads] = useState(0);
 
   useEffect(() => {
     if (!profile) return;
+    // Unread notifications
     supabase.from('notifications').select('id', { count: 'exact' })
       .eq('user_id', profile.id).eq('read', false)
       .then(({ count }) => setUnread(count || 0));
+    // Unread threads: threads/replies created after last visit stored in localStorage
+    const lastVisit = localStorage.getItem('noticeboard_last_visit') || '1970-01-01';
+    supabase.from('threads').select('id', { count: 'exact' })
+      .gt('created_at', lastVisit)
+      .neq('author_id', profile.id)
+      .then(({ count: tc }) => {
+        supabase.from('thread_replies').select('id', { count: 'exact' })
+          .gt('created_at', lastVisit)
+          .neq('author_id', profile.id)
+          .then(({ count: rc }) => setUnreadThreads((tc || 0) + (rc || 0)));
+      });
   }, [profile]);
 
   const isActive = (path) => router.pathname === path;
@@ -27,8 +40,8 @@ export default function BottomNav() {
         <Link href="/manager/staff" className={isActive('/manager/staff') ? 'active' : ''}>
           <PeopleIcon /> Staff
         </Link>
-        <Link href="/manager/swaps" className={isActive('/manager/swaps') ? 'active' : ''}>
-          <SwapIcon /> Swaps
+        <Link href="/noticeboard" className={isActive('/noticeboard') ? 'active' : ''} style={{ position: 'relative' }}>
+          <ChatIcon /> Board {unreadThreads > 0 && <span className="notif-dot" />}
         </Link>
         <Link href="/notifications" className={isActive('/notifications') ? 'active' : ''}>
           <BellIcon /> Alerts {unread > 0 && <span className="notif-dot" />}
@@ -48,8 +61,8 @@ export default function BottomNav() {
       <Link href="/staff/availability" className={isActive('/staff/availability') ? 'active' : ''}>
         <CheckIcon /> Availability
       </Link>
-      <Link href="/staff/swaps" className={isActive('/staff/swaps') ? 'active' : ''}>
-        <SwapIcon /> Swaps
+      <Link href="/noticeboard" className={isActive('/noticeboard') ? 'active' : ''} style={{ position: 'relative' }}>
+        <ChatIcon /> Board {unreadThreads > 0 && <span className="notif-dot" />}
       </Link>
       <Link href="/notifications" className={isActive('/notifications') ? 'active' : ''}>
         <BellIcon /> Alerts {unread > 0 && <span className="notif-dot" />}
@@ -89,5 +102,10 @@ const UserIcon = () => (
 const CheckIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <polyline points="9 11 12 14 22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+  </svg>
+);
+const ChatIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
   </svg>
 );
