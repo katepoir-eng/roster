@@ -46,13 +46,13 @@ export default function ManagerRoster() {
       date: format(selectedDay, 'yyyy-MM-dd'),
       created_by: profile.id,
     });
-    if (!error) {
-      // Notify the staff member
-      await supabase.from('notifications').insert({
+  if (!error) {
+      // Notify the staff member (non-blocking)
+      supabase.from('notifications').insert({
         user_id: newShift.staff_id,
         title: 'New shift assigned',
         message: `You have a new shift on ${format(selectedDay, 'EEE d MMM')}: ${newShift.start_time}–${newShift.end_time}`,
-      });
+      }).then(() => {});
       fetchShifts();
       setShowAddModal(false);
       setNewShift({ staff_id: '', start_time: '09:00', end_time: '17:00', title: '', notes: '', is_recurring: false });
