@@ -6,7 +6,7 @@ import BottomNav from '../../components/BottomNav';
 import { format, startOfMonth, endOfMonth, isToday, isFuture, parseISO } from 'date-fns';
 
 export default function StaffShifts() {
-  const { profile, loading } = useAuth();
+  const { profile, realProfile, loading } = useAuth();
   const router = useRouter();
   const [shifts, setShifts] = useState([]);
   const [view, setView] = useState('upcoming');
@@ -29,7 +29,9 @@ export default function StaffShifts() {
 
   async function fetchShifts() {
     const now = new Date();
-    let query = supabase.from('shifts').select('*').eq('staff_id', profile.id).order('date').order('start_time');
+    // Use realProfile.id so manager sees their own shifts even in staff view mode
+    const userId = realProfile?.id || profile.id;
+    let query = supabase.from('shifts').select('*').eq('staff_id', userId).order('date').order('start_time');
     if (view === 'upcoming') query = query.gte('date', format(now, 'yyyy-MM-dd'));
     else {
       query = query.gte('date', format(startOfMonth(now), 'yyyy-MM-dd'))
@@ -61,7 +63,7 @@ export default function StaffShifts() {
   async function requestSwap() {
     setSubmitting(true);
     const { error } = await supabase.from('swap_requests').insert({
-      requester_id: profile.id,
+      requester_id: realProfile?.id || profile.id,
       shift_id: selectedShift.id,
       target_staff_id: targetStaff || null,
       note: swapNote,
@@ -111,7 +113,7 @@ export default function StaffShifts() {
         <div
           className="card"
           onClick={() => router.push('/noticeboard')}
-          style={{ marginBottom: '1rem', cursor: 'pointer', borderColor: hasUnread ? 'var(--accent)' : 'var(--border)', position: 'relative' }}
+          style={{ marginBottom: '1rem', cursor: 'pointer', borderColor: hasUnread ? 'var(--accent)' : 'var(--border)' }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -185,7 +187,6 @@ export default function StaffShifts() {
             <p style={{ color: 'var(--text-dim)', fontSize: '0.85rem', marginBottom: '1.2rem' }}>
               {format(parseISO(selectedShift.date), 'EEE d MMM')} · {selectedShift.start_time.slice(0,5)}–{selectedShift.end_time.slice(0,5)}
             </p>
-
             <div className="form-group">
               <label>Swap with (optional)</label>
               <select value={targetStaff} onChange={e => setTargetStaff(e.target.value)}>
@@ -193,12 +194,10 @@ export default function StaffShifts() {
                 {allStaff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
               </select>
             </div>
-
             <div className="form-group">
               <label>Reason / Note</label>
               <textarea rows={2} value={swapNote} onChange={e => setSwapNote(e.target.value)} placeholder="Why do you need to swap?" style={{ resize: 'none' }} />
             </div>
-
             <button className="btn btn-primary btn-full" onClick={requestSwap} disabled={submitting}>
               {submitting ? 'Submitting…' : 'Submit Request'}
             </button>
