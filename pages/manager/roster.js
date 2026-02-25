@@ -3,7 +3,7 @@ import { useRouter } from 'next/router';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
 import BottomNav from '../../components/BottomNav';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, isSameDay, isToday, addMonths, subMonths } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, isSameDay, isToday, addMonths, subMonths, addWeeks, startOfDay } from 'date-fns';
 
 export default function ManagerRoster() {
   const { profile, loading } = useAuth();
@@ -12,11 +12,13 @@ export default function ManagerRoster() {
   const [selectedDay, setSelectedDay] = useState(new Date());
   const [shifts, setShifts] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [unavailability, setUnavailability] = useState({}); // { 'yyyy-MM-dd': [staffName, ...] }
+  const [upcomingShifts, setUpcomingShifts] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editShift, setEditShift] = useState(null);
   const [newShift, setNewShift] = useState({ staff_id: '', start_time: '09:00', end_time: '17:00', title: '', notes: '', is_recurring: false });
   const [saving, setSaving] = useState(false);
-  const [recurringPreview, setRecurringPreview] = useState(null); // { shifts: [], copying: false }
+  const [recurringPreview, setRecurringPreview] = useState(null);
 
   useEffect(() => {
     if (!loading && (!profile || profile.role !== 'manager')) router.replace('/');
@@ -26,6 +28,8 @@ export default function ManagerRoster() {
     if (!profile) return;
     fetchShifts();
     fetchStaff();
+    fetchUnavailability();
+    fetchUpcoming();
   }, [profile, currentMonth]);
 
   async function fetchShifts() {
@@ -42,6 +46,31 @@ export default function ManagerRoster() {
     setStaff(data || []);
   }
 
+  async function fetchUnavailability() {
+    const start = format(startOfMonth(currentMonth), 'yyyy-MM-dd');
+    const end = format(endOfMonth(currentMonth), 'yyyy-MM-dd');
+    const { data } = await supabase.from('availability')
+      .select('date, profiles(full_name)')
+      .eq('available', false)
+      .gte('date', start).lte('date', end);
+    const map = {};
+    (data || []).forEach(row => {
+      if (!map[row.date]) map[row.date] = [];
+      map[row.date].push(row.profiles?.full_name || 'Unknown');
+    });
+    setUnavailability(map);
+  }
+
+  async function fetchUpcoming() {
+    const today = format(startOfDay(new Date()), 'yyyy-MM-dd');
+    const sixWeeks = format(addWeeks(new Date(), 6), 'yyyy-MM-dd');
+    const { data } = await supabase.from('shifts')
+      .select('*, staff:profiles!shifts_staff_id_fkey(full_name)')
+      .gte('date', today).lte('date', sixWeeks)
+      .order('date').order('start_time');
+    setUpcomingShifts(data || []);
+  }
+
   async function addShift() {
     setSaving(true);
     const { error } = await supabase.from('shifts').insert({
@@ -56,6 +85,7 @@ export default function ManagerRoster() {
         message: `You have a new shift on ${format(selectedDay, 'EEE d MMM')}: ${newShift.start_time}–${newShift.end_time}`,
       }).then(() => {});
       fetchShifts();
+      fetchUpcoming();
       setShowAddModal(false);
       setNewShift({ staff_id: '', start_time: '09:00', end_time: '17:00', title: '', notes: '', is_recurring: false });
     }
@@ -79,6 +109,7 @@ export default function ManagerRoster() {
         message: `Your shift on ${format(selectedDay, 'EEE d MMM')} has been updated: ${editShift.start_time}–${editShift.end_time}`,
       }).then(() => {});
       fetchShifts();
+      fetchUpcoming();
       setEditShift(null);
     }
     setSaving(false);
@@ -93,24 +124,21 @@ export default function ManagerRoster() {
       message: `A shift on ${format(selectedDay, 'EEE d MMM')} has been removed.`,
     }).then(() => {});
     fetchShifts();
+    fetchUpcoming();
   }
 
   async function previewRecurringShifts() {
     const lastMonth = subMonths(currentMonth, 1);
     const lastStart = format(startOfMonth(lastMonth), 'yyyy-MM-dd');
     const lastEnd = format(endOfMonth(lastMonth), 'yyyy-MM-dd');
-
     const { data: lastMonthShifts } = await supabase.from('shifts')
       .select('*, staff:profiles!shifts_staff_id_fkey(full_name)')
       .gte('date', lastStart).lte('date', lastEnd)
       .eq('is_recurring', true);
-
     if (!lastMonthShifts || lastMonthShifts.length === 0) {
       alert(`No recurring shifts found in ${format(lastMonth, 'MMMM yyyy')}.`);
       return;
     }
-
-    // Get all days in current month grouped by day of week
     const currentDays = eachDayOfInterval({ start: startOfMonth(currentMonth), end: endOfMonth(currentMonth) });
     const daysByWeekday = {};
     currentDays.forEach(day => {
@@ -118,20 +146,13 @@ export default function ManagerRoster() {
       if (!daysByWeekday[dow]) daysByWeekday[dow] = [];
       daysByWeekday[dow].push(day);
     });
-
-    // Deduplicate: one template per staff + day of week
     const seen = new Set();
     const uniqueShifts = [];
     lastMonthShifts.forEach(shift => {
       const dow = getDay(new Date(shift.date + 'T12:00:00'));
       const key = `${shift.staff_id}-${dow}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        uniqueShifts.push({ ...shift, dow });
-      }
+      if (!seen.has(key)) { seen.add(key); uniqueShifts.push({ ...shift, dow }); }
     });
-
-    // Map each unique template to matching weekdays in current month
     const preview = [];
     uniqueShifts.forEach(shift => {
       const matchingDays = daysByWeekday[shift.dow] || [];
@@ -140,24 +161,17 @@ export default function ManagerRoster() {
         const alreadyExists = shifts.some(s => s.staff_id === shift.staff_id && s.date === newDate);
         if (!alreadyExists) {
           preview.push({
-            staff_id: shift.staff_id,
-            staff_name: shift.staff?.full_name,
-            date: newDate,
-            start_time: shift.start_time,
-            end_time: shift.end_time,
-            title: shift.title,
-            notes: shift.notes,
-            is_recurring: true,
+            staff_id: shift.staff_id, staff_name: shift.staff?.full_name,
+            date: newDate, start_time: shift.start_time, end_time: shift.end_time,
+            title: shift.title, notes: shift.notes, is_recurring: true,
           });
         }
       });
     });
-
     if (preview.length === 0) {
       alert(`All recurring shifts from ${format(lastMonth, 'MMMM')} already exist in ${format(currentMonth, 'MMMM yyyy')}.`);
       return;
     }
-
     preview.sort((a, b) => a.date.localeCompare(b.date) || a.start_time.localeCompare(b.start_time));
     setRecurringPreview({ shifts: preview, copying: false });
   }
@@ -165,23 +179,13 @@ export default function ManagerRoster() {
   async function confirmCopyRecurring() {
     setRecurringPreview(p => ({ ...p, copying: true }));
     const toInsert = recurringPreview.shifts.map(s => ({
-      staff_id: s.staff_id,
-      date: s.date,
-      start_time: s.start_time,
-      end_time: s.end_time,
-      title: s.title,
-      notes: s.notes,
-      is_recurring: true,
-      created_by: profile.id,
+      staff_id: s.staff_id, date: s.date, start_time: s.start_time,
+      end_time: s.end_time, title: s.title, notes: s.notes,
+      is_recurring: true, created_by: profile.id,
     }));
     const { error } = await supabase.from('shifts').insert(toInsert);
-    if (!error) {
-      fetchShifts();
-      setRecurringPreview(null);
-    } else {
-      alert('Error copying shifts. Please try again.');
-      setRecurringPreview(p => ({ ...p, copying: false }));
-    }
+    if (!error) { fetchShifts(); fetchUpcoming(); setRecurringPreview(null); }
+    else { alert('Error copying shifts. Please try again.'); setRecurringPreview(p => ({ ...p, copying: false })); }
   }
 
   if (loading || !profile) return <div className="spinner" />;
@@ -190,11 +194,18 @@ export default function ManagerRoster() {
   const startPad = getDay(days[0]);
   const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
   const dayShifts = shifts.filter(s => s.date === format(selectedDay, 'yyyy-MM-dd'));
+  const dayUnavailable = unavailability[format(selectedDay, 'yyyy-MM-dd')] || [];
   const lastMonthName = format(subMonths(currentMonth, 1), 'MMMM');
+
+  // Group upcoming by date
+  const upcomingByDate = {};
+  upcomingShifts.forEach(s => {
+    if (!upcomingByDate[s.date]) upcomingByDate[s.date] = [];
+    upcomingByDate[s.date].push(s);
+  });
 
   return (
     <div className="container page-content">
-      {/* Header */}
       <div className="page-header">
         <div>
           <div style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>Manager</div>
@@ -212,11 +223,8 @@ export default function ManagerRoster() {
 
       {/* Recurring shifts banner */}
       <div style={{ marginBottom: '0.8rem' }}>
-        <button
-          className="btn btn-ghost btn-full"
-          onClick={previewRecurringShifts}
-          style={{ fontSize: '0.85rem', color: 'var(--accent)', borderColor: 'var(--accent-dim)' }}
-        >
+        <button className="btn btn-ghost btn-full" onClick={previewRecurringShifts}
+          style={{ fontSize: '0.85rem', color: 'var(--accent)', borderColor: 'var(--accent-dim)' }}>
           🔁 Copy recurring shifts from {lastMonthName}
         </button>
       </div>
@@ -231,31 +239,41 @@ export default function ManagerRoster() {
           {days.map(day => {
             const dateStr = format(day, 'yyyy-MM-dd');
             const hasShift = shifts.some(s => s.date === dateStr);
+            const hasUnavail = !!unavailability[dateStr];
             const selected = isSameDay(day, selectedDay);
             return (
               <div
                 key={dateStr}
                 className={`cal-day ${isToday(day) ? 'today' : ''} ${hasShift ? 'has-shift' : ''} ${selected ? 'selected' : ''}`}
                 onClick={() => setSelectedDay(day)}
+                style={{ position: 'relative' }}
               >
                 {format(day, 'd')}
+                {hasUnavail && (
+                  <span style={{ position: 'absolute', top: 1, right: 2, fontSize: '0.55rem', color: 'var(--danger)', fontWeight: 900, lineHeight: 1 }}>✕</span>
+                )}
               </div>
             );
           })}
         </div>
       </div>
 
-      {/* Selected day shifts */}
+      {/* Selected day */}
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
           <h2 style={{ fontWeight: 700, fontSize: '1rem' }}>{format(selectedDay, 'EEEE, d MMMM')}</h2>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>{dayShifts.length} shift{dayShifts.length !== 1 ? 's' : ''}</span>
         </div>
 
-        {dayShifts.length === 0 ? (
-          <div className="empty-state">
-            <p>No shifts scheduled.<br />Tap + Shift to add one.</p>
+        {/* Unavailability notice */}
+        {dayUnavailable.length > 0 && (
+          <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid var(--danger)', borderRadius: 'var(--radius)', padding: '0.5rem 0.8rem', marginBottom: '0.6rem', fontSize: '0.82rem', color: 'var(--danger)' }}>
+            ✕ Unavailable: {dayUnavailable.join(', ')}
           </div>
+        )}
+
+        {dayShifts.length === 0 ? (
+          <div className="empty-state"><p>No shifts scheduled.<br />Tap + Shift to add one.</p></div>
         ) : (
           dayShifts.map(shift => (
             <div key={shift.id} className="shift-item">
@@ -267,15 +285,42 @@ export default function ManagerRoster() {
                 </div>
                 <div className="shift-role">{shift.title || 'Shift'}</div>
               </div>
-              <button
-                onClick={() => setEditShift({ ...shift, start_time: shift.start_time.slice(0,5), end_time: shift.end_time.slice(0,5) })}
-                style={{ background: 'none', color: 'var(--accent)', fontSize: '0.85rem', padding: '0.2rem 0.4rem', marginRight: '0.2rem' }}
-              >✏️</button>
-              <button onClick={() => deleteShift(shift.id, shift.staff_id)} style={{ background: 'none', color: 'var(--danger)', fontSize: '1.2rem', padding: '0.2rem 0.4rem' }}>×</button>
+              <button onClick={() => setEditShift({ ...shift, start_time: shift.start_time.slice(0,5), end_time: shift.end_time.slice(0,5) })}
+                style={{ background: 'none', color: 'var(--accent)', fontSize: '0.85rem', padding: '0.2rem 0.4rem', marginRight: '0.2rem' }}>✏️</button>
+              <button onClick={() => deleteShift(shift.id, shift.staff_id)}
+                style={{ background: 'none', color: 'var(--danger)', fontSize: '1.2rem', padding: '0.2rem 0.4rem' }}>×</button>
             </div>
           ))
         )}
       </div>
+
+      {/* Upcoming 6 weeks */}
+      <div style={{ marginTop: '2rem', marginBottom: '0.6rem' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>
+          Upcoming — Next 6 Weeks
+        </div>
+      </div>
+      {Object.keys(upcomingByDate).length === 0 ? (
+        <div className="empty-state"><p>No upcoming shifts scheduled.</p></div>
+      ) : (
+        Object.entries(upcomingByDate).map(([date, dayShifts]) => (
+          <div key={date} style={{ marginBottom: '0.8rem' }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.3rem' }}>
+              {isToday(new Date(date + 'T12:00:00')) ? '📍 Today' : format(new Date(date + 'T12:00:00'), 'EEE d MMM')}
+            </div>
+            {dayShifts.map(shift => (
+              <div key={shift.id} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.3rem 0', borderBottom: '1px solid var(--border)', fontSize: '0.85rem' }}>
+                <span style={{ color: 'var(--text-dim)', fontFamily: 'monospace', fontSize: '0.8rem', flexShrink: 0 }}>
+                  {shift.start_time.slice(0,5)}–{shift.end_time.slice(0,5)}
+                </span>
+                <span style={{ fontWeight: 600, flex: 1 }}>{shift.staff?.full_name}</span>
+                {shift.title && <span style={{ color: 'var(--text-dim)', fontSize: '0.78rem' }}>{shift.title}</span>}
+                {shift.is_recurring && <span style={{ fontSize: '0.7rem', color: 'var(--accent)' }}>🔁</span>}
+              </div>
+            ))}
+          </div>
+        ))
+      )}
 
       {/* Add Shift Modal */}
       {showAddModal && (
@@ -283,7 +328,6 @@ export default function ManagerRoster() {
           <div className="modal-sheet">
             <div className="modal-handle" />
             <h2 style={{ fontWeight: 800, marginBottom: '1.2rem' }}>Add Shift — {format(selectedDay, 'd MMM')}</h2>
-
             <div className="form-group">
               <label>Staff Member</label>
               <select value={newShift.staff_id} onChange={e => setNewShift({...newShift, staff_id: e.target.value})}>
@@ -291,7 +335,6 @@ export default function ManagerRoster() {
                 {staff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
               </select>
             </div>
-
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem' }}>
               <div className="form-group">
                 <label>Start</label>
@@ -302,22 +345,18 @@ export default function ManagerRoster() {
                 <input type="time" value={newShift.end_time} onChange={e => setNewShift({...newShift, end_time: e.target.value})} />
               </div>
             </div>
-
             <div className="form-group">
               <label>Shift Title (optional)</label>
               <input type="text" placeholder="e.g. Morning, Floor supervisor…" value={newShift.title} onChange={e => setNewShift({...newShift, title: e.target.value})} />
             </div>
-
             <div className="form-group">
               <label>Notes (optional)</label>
               <textarea rows={2} placeholder="Any notes for this shift…" value={newShift.notes} onChange={e => setNewShift({...newShift, notes: e.target.value})} style={{ resize: 'none' }} />
             </div>
-
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1rem' }}>
               <input type="checkbox" id="recurring" style={{ width: 'auto' }} checked={newShift.is_recurring} onChange={e => setNewShift({...newShift, is_recurring: e.target.checked})} />
               <label htmlFor="recurring" style={{ fontSize: '0.9rem', color: 'var(--text)', textTransform: 'none', letterSpacing: 0 }}>Mark as recurring shift</label>
             </div>
-
             <button className="btn btn-primary btn-full" onClick={addShift} disabled={!newShift.staff_id || saving}>
               {saving ? 'Saving…' : 'Add Shift'}
             </button>
@@ -331,7 +370,6 @@ export default function ManagerRoster() {
           <div className="modal-sheet">
             <div className="modal-handle" />
             <h2 style={{ fontWeight: 800, marginBottom: '1.2rem' }}>Edit Shift — {format(selectedDay, 'd MMM')}</h2>
-
             <div className="form-group">
               <label>Staff Member</label>
               <select value={editShift.staff_id} onChange={e => setEditShift({...editShift, staff_id: e.target.value})}>
@@ -339,7 +377,6 @@ export default function ManagerRoster() {
                 {staff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
               </select>
             </div>
-
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem' }}>
               <div className="form-group">
                 <label>Start</label>
@@ -350,22 +387,18 @@ export default function ManagerRoster() {
                 <input type="time" value={editShift.end_time} onChange={e => setEditShift({...editShift, end_time: e.target.value})} />
               </div>
             </div>
-
             <div className="form-group">
               <label>Shift Title (optional)</label>
               <input type="text" placeholder="e.g. Morning, Floor supervisor…" value={editShift.title || ''} onChange={e => setEditShift({...editShift, title: e.target.value})} />
             </div>
-
             <div className="form-group">
               <label>Notes (optional)</label>
               <textarea rows={2} placeholder="Any notes for this shift…" value={editShift.notes || ''} onChange={e => setEditShift({...editShift, notes: e.target.value})} style={{ resize: 'none' }} />
             </div>
-
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1rem' }}>
               <input type="checkbox" id="edit-recurring" style={{ width: 'auto' }} checked={editShift.is_recurring} onChange={e => setEditShift({...editShift, is_recurring: e.target.checked})} />
               <label htmlFor="edit-recurring" style={{ fontSize: '0.9rem', color: 'var(--text)', textTransform: 'none', letterSpacing: 0 }}>Mark as recurring shift</label>
             </div>
-
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem' }}>
               <button className="btn btn-ghost btn-full" onClick={() => setEditShift(null)}>Cancel</button>
               <button className="btn btn-primary btn-full" onClick={saveEditShift} disabled={!editShift.staff_id || saving}>
@@ -385,7 +418,6 @@ export default function ManagerRoster() {
             <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)', marginBottom: '1rem' }}>
               {recurringPreview.shifts.length} shift{recurringPreview.shifts.length !== 1 ? 's' : ''} will be created in {format(currentMonth, 'MMMM yyyy')}:
             </p>
-
             {recurringPreview.shifts.map((s, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', borderBottom: '1px solid var(--border)' }}>
                 <div>
@@ -398,7 +430,6 @@ export default function ManagerRoster() {
                 </div>
               </div>
             ))}
-
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem', marginTop: '1.2rem' }}>
               <button className="btn btn-ghost btn-full" onClick={() => setRecurringPreview(null)}>Cancel</button>
               <button className="btn btn-primary btn-full" onClick={confirmCopyRecurring} disabled={recurringPreview.copying}>
