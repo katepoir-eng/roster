@@ -29,8 +29,9 @@ export default function ManagerRoster() {
   async function fetchShifts() {
     const start = format(startOfMonth(currentMonth), 'yyyy-MM-dd');
     const end = format(endOfMonth(currentMonth), 'yyyy-MM-dd');
-    const { data } = await supabase.from('shifts').select('*, profiles(full_name)')
+    const { data, error } = await supabase.from('shifts').select('*, profiles(full_name)')
       .gte('date', start).lte('date', end);
+    console.log('shifts fetched:', data, 'error:', error);
     setShifts(data || []);
   }
 
