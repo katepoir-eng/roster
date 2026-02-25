@@ -4,6 +4,12 @@ import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
 import BottomNav from '../../components/BottomNav';
 
+const INTEREST_OPTIONS = [
+  { value: 'happy', emoji: '😊🔄', label: 'Happy', desc: 'Prefer more shifts' },
+  { value: 'good', emoji: '👍', label: 'Good', desc: 'Flexible' },
+  { value: 'change_please', emoji: '😕🔄', label: 'Change please', desc: 'Prefer fewer shifts' },
+];
+
 export default function ManagerStaff() {
   const { profile, loading } = useAuth();
   const router = useRouter();
@@ -30,17 +36,11 @@ export default function ManagerStaff() {
   async function createStaff() {
     setSaving(true);
     setError('');
-    // Sign up via Supabase (this creates auth user + triggers profile creation)
-    const { error } = await supabase.auth.admin ? 
-      // If admin API available, use it
-      { error: new Error('Use Supabase dashboard to create staff accounts') } :
-      // Otherwise direct signup
-      await supabase.auth.signUp({
-        email: form.email,
-        password: form.password,
-        options: { data: { full_name: form.full_name, role: 'staff' } }
-      });
-    
+    const { error } = await supabase.auth.signUp({
+      email: form.email,
+      password: form.password,
+      options: { data: { full_name: form.full_name, role: 'staff' } }
+    });
     setSaving(false);
     if (error) {
       setError('Could not create account. Use Supabase dashboard > Authentication > Users to add staff manually.');
@@ -68,7 +68,7 @@ export default function ManagerStaff() {
       )}
 
       <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.8rem 1rem', marginBottom: '1rem', fontSize: '0.82rem', color: 'var(--text-dim)' }}>
-        💡 <strong>Tip:</strong> You can also add staff directly in Supabase → Authentication → Users. Set metadata: <span className="mono">{"{ \"full_name\": \"Name\", \"role\": \"staff\" }"}</span>
+        💡 <strong>Tip:</strong> You can also add staff directly in Supabase → Authentication → Users.
       </div>
 
       {staff.length === 0 ? (
@@ -76,22 +76,35 @@ export default function ManagerStaff() {
           <p>No staff added yet.<br />Add your first team member above.</p>
         </div>
       ) : (
-        staff.map(member => (
-          <div key={member.id} className="shift-item">
-            <div style={{
-              width: 40, height: 40, borderRadius: '50%',
-              background: 'var(--accent-dim)', color: 'var(--accent)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontWeight: 800, fontSize: '1rem', flexShrink: 0
-            }}>
-              {member.full_name.charAt(0).toUpperCase()}
+        staff.map(member => {
+          const opt = INTEREST_OPTIONS.find(o => o.value === member.interest_level);
+          return (
+            <div key={member.id} className="card" style={{ marginBottom: '0.6rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
+                <div style={{
+                  width: 40, height: 40, borderRadius: '50%',
+                  background: 'var(--accent-dim)', color: 'var(--accent)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontWeight: 800, fontSize: '1rem', flexShrink: 0
+                }}>
+                  {member.full_name.charAt(0).toUpperCase()}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{member.full_name}</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Staff member</div>
+                </div>
+                {opt ? (
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '1.1rem' }}>{opt.emoji}</div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>{opt.label}</div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', fontStyle: 'italic' }}>No pref</div>
+                )}
+              </div>
             </div>
-            <div className="shift-info">
-              <div className="shift-name">{member.full_name}</div>
-              <div className="shift-role">Staff member</div>
-            </div>
-          </div>
-        ))
+          );
+        })
       )}
 
       {showModal && (
@@ -99,7 +112,6 @@ export default function ManagerStaff() {
           <div className="modal-sheet">
             <div className="modal-handle" />
             <h2 style={{ fontWeight: 800, marginBottom: '1.2rem' }}>Add Staff Member</h2>
-
             <div className="form-group">
               <label>Full Name</label>
               <input type="text" value={form.full_name} onChange={e => setForm({...form, full_name: e.target.value})} placeholder="Jane Smith" />
@@ -112,9 +124,7 @@ export default function ManagerStaff() {
               <label>Temporary Password</label>
               <input type="text" value={form.password} onChange={e => setForm({...form, password: e.target.value})} placeholder="Min 6 characters" />
             </div>
-
             {error && <p style={{ color: 'var(--danger)', fontSize: '0.85rem', marginBottom: '0.8rem' }}>{error}</p>}
-
             <button className="btn btn-primary btn-full" onClick={createStaff} disabled={!form.full_name || !form.email || !form.password || saving}>
               {saving ? 'Creating…' : 'Create Account'}
             </button>
