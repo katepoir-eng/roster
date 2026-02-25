@@ -11,7 +11,7 @@ const INTEREST_OPTIONS = [
 ];
 
 export default function Profile() {
-  const { profile, loading, signOut } = useAuth();
+  const { profile, realProfile, loading, signOut, staffViewMode, setStaffViewMode } = useAuth();
   const router = useRouter();
   const [interest, setInterest] = useState(null);
   const [savingInterest, setSavingInterest] = useState(false);
@@ -31,7 +31,6 @@ export default function Profile() {
     const oldLevel = profile.interest_level;
     await supabase.from('profiles').update({ interest_level: val }).eq('id', profile.id);
 
-    // Notify all managers if interest level changed
     if (oldLevel !== val) {
       const { data: managers } = await supabase.from('profiles').select('id').eq('role', 'manager');
       if (managers?.length) {
@@ -57,10 +56,19 @@ export default function Profile() {
     router.replace('/');
   }
 
+  function toggleStaffView() {
+    const entering = !staffViewMode;
+    setStaffViewMode(entering);
+    if (entering) router.push('/staff/shifts');
+  }
+
   if (loading || !profile) return <div className="spinner" />;
 
+  // Use realProfile to check actual role (staffViewMode spoofs role)
+  const isReallyManager = realProfile?.role === 'manager';
+
   return (
-    <div className="container page-content">
+    <div className="container page-content" style={{ paddingTop: staffViewMode ? '3rem' : undefined }}>
       <div className="page-header">
         <h1>Profile</h1>
       </div>
@@ -77,12 +85,31 @@ export default function Profile() {
         </div>
         <div style={{ fontWeight: 800, fontSize: '1.3rem' }}>{profile.full_name}</div>
         <div style={{ color: 'var(--text-dim)', marginTop: '0.3rem', textTransform: 'capitalize', fontSize: '0.9rem' }}>
-          {profile.role === 'manager' ? '⭐ Manager' : '👤 Staff'}
+          {isReallyManager ? '⭐ Manager' : '👤 Staff'}
         </div>
       </div>
 
-      {/* Shift preference — staff only */}
-      {profile.role === 'staff' && (
+      {/* Staff View Mode toggle — manager only */}
+      {isReallyManager && (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          <div style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: '0.6rem' }}>
+            View Mode
+          </div>
+          <p style={{ fontSize: '0.82rem', color: 'var(--text-dim)', marginBottom: '0.8rem' }}>
+            Switch to staff view to see exactly what your team sees — shifts, availability, noticeboard, and swap requests.
+          </p>
+          <button
+            onClick={toggleStaffView}
+            className={staffViewMode ? 'btn btn-primary btn-full' : 'btn btn-ghost btn-full'}
+            style={{ borderColor: staffViewMode ? undefined : 'var(--accent)', color: staffViewMode ? undefined : 'var(--accent)' }}
+          >
+            {staffViewMode ? '👁 Currently in Staff View — tap to exit' : '👁 Enter Staff View'}
+          </button>
+        </div>
+      )}
+
+      {/* Shift preference — staff only (or manager in staff view) */}
+      {(!isReallyManager || staffViewMode) && (
         <div className="card" style={{ marginBottom: '1rem' }}>
           <div style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: '0.8rem' }}>
             Shift Preference
@@ -115,9 +142,7 @@ export default function Profile() {
             </button>
           ))}
           {saved && (
-            <p style={{ fontSize: '0.82rem', color: 'var(--accent)', marginTop: '0.4rem', textAlign: 'center' }}>
-              ✓ Preference saved
-            </p>
+            <p style={{ fontSize: '0.82rem', color: 'var(--accent)', marginTop: '0.4rem', textAlign: 'center' }}>✓ Preference saved</p>
           )}
         </div>
       )}
