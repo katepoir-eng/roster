@@ -6,17 +6,16 @@ import { useAuth } from '../context/AuthContext';
 
 export default function BottomNav() {
   const router = useRouter();
-  const { profile } = useAuth();
+  const { profile, realProfile, staffViewMode, setStaffViewMode } = useAuth();
   const [unread, setUnread] = useState(0);
   const [unreadThreads, setUnreadThreads] = useState(0);
 
   useEffect(() => {
     if (!profile) return;
-    // Unread notifications
     supabase.from('notifications').select('id', { count: 'exact' })
       .eq('user_id', profile.id).eq('read', false)
       .then(({ count }) => setUnread(count || 0));
-    // Unread threads: threads/replies created after last visit stored in localStorage
+
     const lastVisit = localStorage.getItem('noticeboard_last_visit') || '1970-01-01';
     supabase.from('threads').select('id', { count: 'exact' })
       .gt('created_at', lastVisit)
@@ -31,6 +30,42 @@ export default function BottomNav() {
 
   const isActive = (path) => router.pathname === path;
 
+  // Staff view mode banner + staff nav
+  if (staffViewMode && realProfile?.role === 'manager') {
+    return (
+      <>
+        <div
+          onClick={() => { setStaffViewMode(false); router.push('/manager/roster'); }}
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, zIndex: 999,
+            background: 'var(--accent)', color: '#fff',
+            padding: '0.6rem 1rem', textAlign: 'center',
+            fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer',
+          }}
+        >
+          👁 Staff view mode — tap to exit
+        </div>
+        <nav className="bottom-nav">
+          <Link href="/staff/shifts" className={isActive('/staff/shifts') ? 'active' : ''}>
+            <CalIcon /> My Shifts
+          </Link>
+          <Link href="/staff/availability" className={isActive('/staff/availability') ? 'active' : ''}>
+            <CheckIcon /> Availability
+          </Link>
+          <Link href="/noticeboard" className={isActive('/noticeboard') ? 'active' : ''}>
+            <ChatIcon /> Board {unreadThreads > 0 && <span className="notif-dot" />}
+          </Link>
+          <Link href="/notifications" className={isActive('/notifications') ? 'active' : ''}>
+            <BellIcon /> Alerts {unread > 0 && <span className="notif-dot" />}
+          </Link>
+          <Link href="/profile" className={isActive('/profile') ? 'active' : ''}>
+            <UserIcon /> Me
+          </Link>
+        </nav>
+      </>
+    );
+  }
+
   if (profile?.role === 'manager') {
     return (
       <nav className="bottom-nav">
@@ -40,14 +75,14 @@ export default function BottomNav() {
         <Link href="/manager/staff" className={isActive('/manager/staff') ? 'active' : ''}>
           <PeopleIcon /> Staff
         </Link>
+        <Link href="/staff/shifts" className={isActive('/staff/shifts') ? 'active' : ''}>
+          <ShiftIcon /> My Shifts
+        </Link>
         <Link href="/noticeboard" className={isActive('/noticeboard') ? 'active' : ''} style={{ position: 'relative' }}>
           <ChatIcon /> Board {unreadThreads > 0 && <span className="notif-dot" />}
         </Link>
         <Link href="/notifications" className={isActive('/notifications') ? 'active' : ''}>
           <BellIcon /> Alerts {unread > 0 && <span className="notif-dot" />}
-        </Link>
-        <Link href="/profile" className={isActive('/profile') ? 'active' : ''}>
-          <UserIcon /> Me
         </Link>
       </nav>
     );
@@ -107,5 +142,10 @@ const CheckIcon = () => (
 const ChatIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  </svg>
+);
+const ShiftIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
   </svg>
 );
