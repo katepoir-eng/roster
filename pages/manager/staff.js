@@ -21,13 +21,24 @@ export default function ManagerStaff() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Unavailability management
+  // Expanded member state
   const [selectedMember, setSelectedMember] = useState(null);
+  const [activeTab, setActiveTab] = useState('availability'); // 'availability' | 'edit'
+
+  // Availability
   const [unavailMonth, setUnavailMonth] = useState(new Date());
   const [savedUnavail, setSavedUnavail] = useState({});
   const [pendingUnavail, setPendingUnavail] = useState({});
   const [savingUnavail, setSavingUnavail] = useState(false);
   const [unavailSavedMsg, setUnavailSavedMsg] = useState('');
+
+  // Edit name / password
+  const [editName, setEditName] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const [nameSaved, setNameSaved] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [showPasswordSQL, setShowPasswordSQL] = useState(false);
+  const [copiedSQL, setCopiedSQL] = useState(false);
 
   useEffect(() => {
     if (!loading && (!profile || profile.role !== 'manager')) router.replace('/');
@@ -46,13 +57,25 @@ export default function ManagerStaff() {
     setStaff(data || []);
   }
 
+  function openMember(member) {
+    if (selectedMember?.id === member.id) {
+      setSelectedMember(null);
+    } else {
+      setSelectedMember(member);
+      setUnavailMonth(new Date());
+      setActiveTab('availability');
+      setEditName(member.full_name);
+      setNewPassword('');
+      setShowPasswordSQL(false);
+      setNameSaved(false);
+    }
+  }
+
   async function fetchMemberUnavail() {
     const start = format(startOfMonth(unavailMonth), 'yyyy-MM-dd');
     const end = format(endOfMonth(unavailMonth), 'yyyy-MM-dd');
     const { data } = await supabase.from('availability')
-      .select('*')
-      .eq('staff_id', selectedMember.id)
-      .eq('available', false)
+      .select('*').eq('staff_id', selectedMember.id).eq('available', false)
       .gte('date', start).lte('date', end);
     const map = {};
     (data || []).forEach(row => { map[row.date] = true; });
@@ -75,28 +98,41 @@ export default function ManagerStaff() {
     setSavingUnavail(true);
     const added = Object.keys(pendingUnavail).filter(d => !savedUnavail[d]);
     const removed = Object.keys(savedUnavail).filter(d => !pendingUnavail[d]);
-
     for (const dateStr of removed) {
-      await supabase.from('availability').delete()
-        .eq('staff_id', selectedMember.id).eq('date', dateStr);
+      await supabase.from('availability').delete().eq('staff_id', selectedMember.id).eq('date', dateStr);
     }
     for (const dateStr of added) {
       await supabase.from('availability').upsert({
-        staff_id: selectedMember.id,
-        date: dateStr,
-        available: false,
-        note: 'Marked unavailable by manager',
+        staff_id: selectedMember.id, date: dateStr,
+        available: false, note: 'Marked unavailable by manager',
       }, { onConflict: 'staff_id,date' });
     }
-
     setSavedUnavail({ ...pendingUnavail });
     setSavingUnavail(false);
     setUnavailSavedMsg('Saved!');
     setTimeout(() => setUnavailSavedMsg(''), 2000);
   }
 
-  function discardMemberUnavail() {
-    setPendingUnavail({ ...savedUnavail });
+  async function saveEditName() {
+    if (!editName.trim() || editName.trim() === selectedMember.full_name) { setNameSaved(false); return; }
+    setSavingName(true);
+    await supabase.from('profiles').update({ full_name: editName.trim() }).eq('id', selectedMember.id);
+    setSavingName(false);
+    setNameSaved(true);
+    // Update local staff list
+    setStaff(s => s.map(m => m.id === selectedMember.id ? { ...m, full_name: editName.trim() } : m));
+    setSelectedMember(m => ({ ...m, full_name: editName.trim() }));
+    setTimeout(() => setNameSaved(false), 2000);
+  }
+
+  function getPasswordSQL() {
+    return `UPDATE auth.users\nSET encrypted_password = crypt('${newPassword}', gen_salt('bf')),\n    email_confirmed_at = NOW()\nWHERE id = (\n  SELECT id FROM auth.users\n  WHERE email = (SELECT email FROM auth.users u JOIN public.profiles p ON u.id = p.id WHERE p.id = '${selectedMember.id}')\n);`;
+  }
+
+  function copySQL() {
+    navigator.clipboard.writeText(getPasswordSQL());
+    setCopiedSQL(true);
+    setTimeout(() => setCopiedSQL(false), 2000);
   }
 
   async function createStaff() {
@@ -120,13 +156,10 @@ export default function ManagerStaff() {
 
   if (loading || !profile) return <div className="spinner" />;
 
-  // Calendar helpers
   const days = selectedMember ? eachDayOfInterval({ start: startOfMonth(unavailMonth), end: endOfMonth(unavailMonth) }) : [];
   const startPad = days.length ? getDay(days[0]) : 0;
   const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
-  const pendingKeys = Object.keys(pendingUnavail).sort();
-  const savedKeys = Object.keys(savedUnavail).sort();
-  const hasChanges = JSON.stringify(pendingKeys) !== JSON.stringify(savedKeys);
+  const hasChanges = JSON.stringify(Object.keys(pendingUnavail).sort()) !== JSON.stringify(Object.keys(savedUnavail).sort());
 
   return (
     <div className="container page-content">
@@ -141,14 +174,8 @@ export default function ManagerStaff() {
         </div>
       )}
 
-      <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.8rem 1rem', marginBottom: '1rem', fontSize: '0.82rem', color: 'var(--text-dim)' }}>
-        💡 <strong>Tip:</strong> Tap a staff member to manage their unavailability.
-      </div>
-
       {staff.length === 0 ? (
-        <div className="empty-state">
-          <p>No staff added yet.<br />Add your first team member above.</p>
-        </div>
+        <div className="empty-state"><p>No staff added yet.<br />Add your first team member above.</p></div>
       ) : (
         staff.map(member => {
           const opt = INTEREST_OPTIONS.find(o => o.value === member.interest_level);
@@ -156,14 +183,8 @@ export default function ManagerStaff() {
           return (
             <div key={member.id} style={{ marginBottom: '0.6rem' }}>
               {/* Staff card */}
-              <div
-                className="card"
-                onClick={() => {
-                  if (isSelected) { setSelectedMember(null); }
-                  else { setSelectedMember(member); setUnavailMonth(new Date()); }
-                }}
-                style={{ cursor: 'pointer', borderColor: isSelected ? 'var(--accent)' : 'var(--border)', marginBottom: 0, borderBottomLeftRadius: isSelected ? 0 : undefined, borderBottomRightRadius: isSelected ? 0 : undefined }}
-              >
+              <div className="card" onClick={() => openMember(member)}
+                style={{ cursor: 'pointer', borderColor: isSelected ? 'var(--accent)' : 'var(--border)', marginBottom: 0, borderBottomLeftRadius: isSelected ? 0 : undefined, borderBottomRightRadius: isSelected ? 0 : undefined }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
                   <div style={{
                     width: 40, height: 40, borderRadius: '50%',
@@ -176,11 +197,7 @@ export default function ManagerStaff() {
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{member.full_name}</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-                      {Object.keys(savedUnavail).length > 0 && isSelected
-                        ? `${Object.keys(savedUnavail).length} day${Object.keys(savedUnavail).length !== 1 ? 's' : ''} off this month`
-                        : 'Tap to manage availability'}
-                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Tap to manage</div>
                   </div>
                   {opt ? (
                     <div style={{ textAlign: 'right' }}>
@@ -194,64 +211,126 @@ export default function ManagerStaff() {
                 </div>
               </div>
 
-              {/* Expanded availability panel */}
+              {/* Expanded panel */}
               {isSelected && (
-                <div style={{ border: '1px solid var(--accent)', borderTop: 'none', borderBottomLeftRadius: 'var(--radius)', borderBottomRightRadius: 'var(--radius)', padding: '1rem', background: 'var(--surface)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.8rem' }}>
-                    <button className="btn btn-ghost" style={{ padding: '0.3rem 0.7rem' }} onClick={() => setUnavailMonth(subMonths(unavailMonth, 1))}>‹</button>
-                    <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>{format(unavailMonth, 'MMMM yyyy')}</span>
-                    <button className="btn btn-ghost" style={{ padding: '0.3rem 0.7rem' }} onClick={() => setUnavailMonth(addMonths(unavailMonth, 1))}>›</button>
+                <div style={{ border: '1px solid var(--accent)', borderTop: 'none', borderBottomLeftRadius: 'var(--radius)', borderBottomRightRadius: 'var(--radius)', background: 'var(--surface)' }}>
+
+                  {/* Tabs */}
+                  <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
+                    {['availability', 'edit'].map(t => (
+                      <button key={t} onClick={() => setActiveTab(t)}
+                        style={{
+                          flex: 1, padding: '0.6rem', fontSize: '0.82rem', fontWeight: 700,
+                          background: 'none', border: 'none', cursor: 'pointer',
+                          borderBottom: activeTab === t ? '2px solid var(--accent)' : '2px solid transparent',
+                          color: activeTab === t ? 'var(--accent)' : 'var(--text-dim)',
+                          textTransform: 'capitalize',
+                        }}>
+                        {t === 'availability' ? '📅 Availability' : '✏️ Edit Details'}
+                      </button>
+                    ))}
                   </div>
 
-                  {/* Mini calendar */}
-                  <div className="cal-grid" style={{ marginBottom: '0.4rem' }}>
-                    {dayNames.map(d => <div key={d} className="cal-day-header" style={{ fontSize: '0.65rem' }}>{d}</div>)}
-                  </div>
-                  <div className="cal-grid" style={{ marginBottom: '0.8rem' }}>
-                    {Array(startPad).fill(null).map((_, i) => <div key={`pad-${i}`} />)}
-                    {days.map(day => {
-                      const dateStr = format(day, 'yyyy-MM-dd');
-                      const isPending = !!pendingUnavail[dateStr];
-                      const isSavedUnavail = !!savedUnavail[dateStr];
-                      const isPast = new Date(dateStr + 'T12:00:00') < new Date(new Date().setHours(0, 0, 0, 0));
-                      const isUnsaved = isPending !== isSavedUnavail;
-                      return (
-                        <div
-                          key={dateStr}
-                          onClick={() => toggleMemberDate(dateStr)}
-                          className={`cal-day ${isToday(day) ? 'today' : ''}`}
-                          style={{
-                            background: isPending ? 'var(--danger)' : undefined,
-                            color: isPending ? '#fff' : isPast ? 'var(--text-dim)' : undefined,
-                            opacity: isPast ? 0.4 : 1,
-                            cursor: isPast ? 'default' : 'pointer',
-                            fontWeight: isPending ? 700 : undefined,
-                            outline: isUnsaved ? '2px dashed var(--warning, #f59e0b)' : undefined,
-                            outlineOffset: '-2px',
-                            fontSize: '0.8rem',
-                          }}
-                        >
-                          {format(day, 'd')}
+                  {/* Availability tab */}
+                  {activeTab === 'availability' && (
+                    <div style={{ padding: '1rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.8rem' }}>
+                        <button className="btn btn-ghost" style={{ padding: '0.3rem 0.7rem' }} onClick={() => setUnavailMonth(subMonths(unavailMonth, 1))}>‹</button>
+                        <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>{format(unavailMonth, 'MMMM yyyy')}</span>
+                        <button className="btn btn-ghost" style={{ padding: '0.3rem 0.7rem' }} onClick={() => setUnavailMonth(addMonths(unavailMonth, 1))}>›</button>
+                      </div>
+                      <div className="cal-grid" style={{ marginBottom: '0.4rem' }}>
+                        {dayNames.map(d => <div key={d} className="cal-day-header" style={{ fontSize: '0.65rem' }}>{d}</div>)}
+                      </div>
+                      <div className="cal-grid" style={{ marginBottom: '0.8rem' }}>
+                        {Array(startPad).fill(null).map((_, i) => <div key={`pad-${i}`} />)}
+                        {days.map(day => {
+                          const dateStr = format(day, 'yyyy-MM-dd');
+                          const isPending = !!pendingUnavail[dateStr];
+                          const isSavedUnavail = !!savedUnavail[dateStr];
+                          const isPast = new Date(dateStr + 'T12:00:00') < new Date(new Date().setHours(0, 0, 0, 0));
+                          const isUnsaved = isPending !== isSavedUnavail;
+                          return (
+                            <div key={dateStr} onClick={() => toggleMemberDate(dateStr)}
+                              className={`cal-day ${isToday(day) ? 'today' : ''}`}
+                              style={{
+                                background: isPending ? 'var(--danger)' : undefined,
+                                color: isPending ? '#fff' : isPast ? 'var(--text-dim)' : undefined,
+                                opacity: isPast ? 0.4 : 1, cursor: isPast ? 'default' : 'pointer',
+                                fontWeight: isPending ? 700 : undefined,
+                                outline: isUnsaved ? '2px dashed var(--warning, #f59e0b)' : undefined,
+                                outlineOffset: '-2px', fontSize: '0.8rem',
+                              }}>
+                              {format(day, 'd')}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                        {unavailSavedMsg && <span style={{ fontSize: '0.82rem', color: 'var(--accent)', fontWeight: 600 }}>{unavailSavedMsg}</span>}
+                        {hasChanges ? (
+                          <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto' }}>
+                            <button className="btn btn-ghost" style={{ padding: '0.4rem 0.8rem', fontSize: '0.82rem' }} onClick={() => setPendingUnavail({ ...savedUnavail })}>Discard</button>
+                            <button className="btn btn-primary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.82rem' }} onClick={saveMemberUnavail} disabled={savingUnavail}>
+                              {savingUnavail ? 'Saving…' : 'Save Changes'}
+                            </button>
+                          </div>
+                        ) : (
+                          !unavailSavedMsg && <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>Tap dates to mark unavailable</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Edit details tab */}
+                  {activeTab === 'edit' && (
+                    <div style={{ padding: '1rem' }}>
+                      {/* Name */}
+                      <div className="form-group">
+                        <label>Display Name</label>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <input type="text" value={editName} onChange={e => setEditName(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && saveEditName()}
+                            style={{ flex: 1 }} />
+                          <button className="btn btn-primary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.82rem' }}
+                            onClick={saveEditName} disabled={savingName || editName.trim() === selectedMember.full_name}>
+                            {savingName ? '…' : nameSaved ? '✓' : 'Save'}
+                          </button>
                         </div>
-                      );
-                    })}
-                  </div>
+                      </div>
 
-                  {/* Save / Discard */}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
-                    {unavailSavedMsg && <span style={{ fontSize: '0.82rem', color: 'var(--accent)', fontWeight: 600 }}>{unavailSavedMsg}</span>}
-                    {hasChanges && (
-                      <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto' }}>
-                        <button className="btn btn-ghost" style={{ padding: '0.4rem 0.8rem', fontSize: '0.82rem' }} onClick={discardMemberUnavail}>Discard</button>
-                        <button className="btn btn-primary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.82rem' }} onClick={saveMemberUnavail} disabled={savingUnavail}>
-                          {savingUnavail ? 'Saving…' : 'Save Changes'}
+                      {/* Password */}
+                      <div className="form-group" style={{ marginTop: '0.8rem' }}>
+                        <label>Reset Password</label>
+                        <input type="text" placeholder="Enter new password…" value={newPassword}
+                          onChange={e => { setNewPassword(e.target.value); setShowPasswordSQL(false); }} />
+                        <button
+                          className="btn btn-ghost btn-full"
+                          style={{ marginTop: '0.5rem', fontSize: '0.82rem', borderColor: newPassword ? 'var(--accent)' : undefined, color: newPassword ? 'var(--accent)' : undefined }}
+                          onClick={() => setShowPasswordSQL(true)}
+                          disabled={!newPassword.trim()}>
+                          Generate SQL →
                         </button>
                       </div>
-                    )}
-                    {!hasChanges && !unavailSavedMsg && (
-                      <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>Tap dates to mark unavailable</span>
-                    )}
-                  </div>
+
+                      {showPasswordSQL && newPassword && (
+                        <div style={{ marginTop: '0.6rem' }}>
+                          <p style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginBottom: '0.4rem' }}>
+                            Copy this SQL and run it in <strong>Supabase → SQL Editor</strong>:
+                          </p>
+                          <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.7rem', fontSize: '0.72rem', fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all', marginBottom: '0.5rem', color: 'var(--text)' }}>
+{`UPDATE auth.users
+SET encrypted_password = crypt('${newPassword}', gen_salt('bf')),
+    email_confirmed_at = NOW()
+WHERE id = '${selectedMember.id}';`}
+                          </div>
+                          <button className="btn btn-primary btn-full" style={{ fontSize: '0.82rem' }} onClick={copySQL}>
+                            {copiedSQL ? '✓ Copied!' : 'Copy SQL'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
