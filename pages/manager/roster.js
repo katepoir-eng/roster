@@ -13,6 +13,7 @@ export default function ManagerRoster() {
   const [shifts, setShifts] = useState([]);
   const [staff, setStaff] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editShift, setEditShift] = useState(null); // shift being edited
   const [newShift, setNewShift] = useState({ staff_id: '', start_time: '09:00', end_time: '17:00', title: '', notes: '', is_recurring: false });
   const [saving, setSaving] = useState(false);
 
@@ -32,7 +33,6 @@ export default function ManagerRoster() {
     const { data, error } = await supabase.from('shifts')
       .select('*, staff:profiles!shifts_staff_id_fkey(full_name)')
       .gte('date', start).lte('date', end);
-    console.log('shifts fetched:', data, 'error:', error);
     setShifts(data || []);
   }
 
@@ -48,8 +48,7 @@ export default function ManagerRoster() {
       date: format(selectedDay, 'yyyy-MM-dd'),
       created_by: profile.id,
     });
-  if (!error) {
-      // Notify the staff member (non-blocking)
+    if (!error) {
       supabase.from('notifications').insert({
         user_id: newShift.staff_id,
         title: 'New shift assigned',
@@ -58,6 +57,28 @@ export default function ManagerRoster() {
       fetchShifts();
       setShowAddModal(false);
       setNewShift({ staff_id: '', start_time: '09:00', end_time: '17:00', title: '', notes: '', is_recurring: false });
+    }
+    setSaving(false);
+  }
+
+  async function saveEditShift() {
+    setSaving(true);
+    const { error } = await supabase.from('shifts').update({
+      staff_id: editShift.staff_id,
+      start_time: editShift.start_time,
+      end_time: editShift.end_time,
+      title: editShift.title,
+      notes: editShift.notes,
+      is_recurring: editShift.is_recurring,
+    }).eq('id', editShift.id);
+    if (!error) {
+      supabase.from('notifications').insert({
+        user_id: editShift.staff_id,
+        title: 'Shift updated',
+        message: `Your shift on ${format(selectedDay, 'EEE d MMM')} has been updated: ${editShift.start_time}–${editShift.end_time}`,
+      }).then(() => {});
+      fetchShifts();
+      setEditShift(null);
     }
     setSaving(false);
   }
@@ -141,6 +162,10 @@ export default function ManagerRoster() {
                 <div className="shift-name">{shift.staff?.full_name}</div>
                 <div className="shift-role">{shift.title || 'Shift'}</div>
               </div>
+              <button
+                onClick={() => setEditShift({ ...shift, start_time: shift.start_time.slice(0,5), end_time: shift.end_time.slice(0,5) })}
+                style={{ background: 'none', color: 'var(--accent)', fontSize: '0.85rem', padding: '0.2rem 0.4rem', marginRight: '0.2rem' }}
+              >✏️</button>
               <button onClick={() => deleteShift(shift.id, shift.staff_id)} style={{ background: 'none', color: 'var(--danger)', fontSize: '1.2rem', padding: '0.2rem 0.4rem' }}>×</button>
             </div>
           ))
@@ -191,6 +216,57 @@ export default function ManagerRoster() {
             <button className="btn btn-primary btn-full" onClick={addShift} disabled={!newShift.staff_id || saving}>
               {saving ? 'Saving…' : 'Add Shift'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Shift Modal */}
+      {editShift && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setEditShift(null)}>
+          <div className="modal-sheet">
+            <div className="modal-handle" />
+            <h2 style={{ fontWeight: 800, marginBottom: '1.2rem' }}>Edit Shift — {format(selectedDay, 'd MMM')}</h2>
+
+            <div className="form-group">
+              <label>Staff Member</label>
+              <select value={editShift.staff_id} onChange={e => setEditShift({...editShift, staff_id: e.target.value})}>
+                <option value="">Select staff…</option>
+                {staff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+              </select>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem' }}>
+              <div className="form-group">
+                <label>Start</label>
+                <input type="time" value={editShift.start_time} onChange={e => setEditShift({...editShift, start_time: e.target.value})} />
+              </div>
+              <div className="form-group">
+                <label>End</label>
+                <input type="time" value={editShift.end_time} onChange={e => setEditShift({...editShift, end_time: e.target.value})} />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>Shift Title (optional)</label>
+              <input type="text" placeholder="e.g. Morning, Floor supervisor…" value={editShift.title || ''} onChange={e => setEditShift({...editShift, title: e.target.value})} />
+            </div>
+
+            <div className="form-group">
+              <label>Notes (optional)</label>
+              <textarea rows={2} placeholder="Any notes for this shift…" value={editShift.notes || ''} onChange={e => setEditShift({...editShift, notes: e.target.value})} style={{ resize: 'none' }} />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1rem' }}>
+              <input type="checkbox" id="edit-recurring" style={{ width: 'auto' }} checked={editShift.is_recurring} onChange={e => setEditShift({...editShift, is_recurring: e.target.checked})} />
+              <label htmlFor="edit-recurring" style={{ fontSize: '0.9rem', color: 'var(--text)', textTransform: 'none', letterSpacing: 0 }}>Mark as recurring shift</label>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem' }}>
+              <button className="btn btn-ghost btn-full" onClick={() => setEditShift(null)}>Cancel</button>
+              <button className="btn btn-primary btn-full" onClick={saveEditShift} disabled={!editShift.staff_id || saving}>
+                {saving ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
           </div>
         </div>
       )}
