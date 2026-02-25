@@ -119,11 +119,22 @@ export default function ManagerRoster() {
       daysByWeekday[dow].push(day);
     });
 
-    // Map each recurring shift to matching weekdays in current month
-    const preview = [];
+    // Deduplicate: one template per staff + day of week
+    const seen = new Set();
+    const uniqueShifts = [];
     lastMonthShifts.forEach(shift => {
-      const shiftDow = getDay(new Date(shift.date + 'T12:00:00'));
-      const matchingDays = daysByWeekday[shiftDow] || [];
+      const dow = getDay(new Date(shift.date + 'T12:00:00'));
+      const key = `${shift.staff_id}-${dow}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueShifts.push({ ...shift, dow });
+      }
+    });
+
+    // Map each unique template to matching weekdays in current month
+    const preview = [];
+    uniqueShifts.forEach(shift => {
+      const matchingDays = daysByWeekday[shift.dow] || [];
       matchingDays.forEach(day => {
         const newDate = format(day, 'yyyy-MM-dd');
         const alreadyExists = shifts.some(s => s.staff_id === shift.staff_id && s.date === newDate);
