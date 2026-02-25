@@ -42,7 +42,7 @@ export default function ManagerRoster() {
   }
 
   async function fetchStaff() {
-    const { data } = await supabase.from('profiles').select('*').eq('role', 'staff');
+    const { data } = await supabase.from('profiles').select('*').order('full_name');
     setStaff(data || []);
   }
 
