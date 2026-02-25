@@ -12,10 +12,11 @@ export default function ManagerRoster() {
   const [selectedDay, setSelectedDay] = useState(new Date());
   const [shifts, setShifts] = useState([]);
   const [staff, setStaff] = useState([]);
-  const [unavailability, setUnavailability] = useState({}); // { 'yyyy-MM-dd': [staffName, ...] }
+  const [unavailability, setUnavailability] = useState({});
   const [upcomingShifts, setUpcomingShifts] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editShift, setEditShift] = useState(null);
+  const [duplicateShift, setDuplicateShift] = useState(null); // { ...shift, dupDate, dupStaffId }
   const [newShift, setNewShift] = useState({ staff_id: '', start_time: '08:00', end_time: '17:15', title: '', notes: '', is_recurring: false });
   const [saving, setSaving] = useState(false);
   const [recurringPreview, setRecurringPreview] = useState(null);
@@ -84,10 +85,9 @@ export default function ManagerRoster() {
         title: 'New shift assigned',
         message: `You have a new shift on ${format(selectedDay, 'EEE d MMM')}: ${newShift.start_time}–${newShift.end_time}`,
       }).then(() => {});
-      fetchShifts();
-      fetchUpcoming();
+      fetchShifts(); fetchUpcoming();
       setShowAddModal(false);
-      setNewShift({ staff_id: '', start_time: '09:00', end_time: '17:00', title: '', notes: '', is_recurring: false });
+      setNewShift({ staff_id: '', start_time: '08:00', end_time: '17:15', title: '', notes: '', is_recurring: false });
     }
     setSaving(false);
   }
@@ -108,9 +108,33 @@ export default function ManagerRoster() {
         title: 'Shift updated',
         message: `Your shift on ${format(selectedDay, 'EEE d MMM')} has been updated: ${editShift.start_time}–${editShift.end_time}`,
       }).then(() => {});
-      fetchShifts();
-      fetchUpcoming();
+      fetchShifts(); fetchUpcoming();
       setEditShift(null);
+    }
+    setSaving(false);
+  }
+
+  async function saveDuplicate() {
+    if (!duplicateShift.dupDate || !duplicateShift.dupStaffId) return;
+    setSaving(true);
+    const { error } = await supabase.from('shifts').insert({
+      staff_id: duplicateShift.dupStaffId,
+      date: duplicateShift.dupDate,
+      start_time: duplicateShift.start_time,
+      end_time: duplicateShift.end_time,
+      title: duplicateShift.title,
+      notes: duplicateShift.notes,
+      is_recurring: duplicateShift.is_recurring,
+      created_by: profile.id,
+    });
+    if (!error) {
+      supabase.from('notifications').insert({
+        user_id: duplicateShift.dupStaffId,
+        title: 'New shift assigned',
+        message: `You have a new shift on ${format(new Date(duplicateShift.dupDate + 'T12:00:00'), 'EEE d MMM')}: ${duplicateShift.start_time.slice(0,5)}–${duplicateShift.end_time.slice(0,5)}`,
+      }).then(() => {});
+      fetchShifts(); fetchUpcoming();
+      setDuplicateShift(null);
     }
     setSaving(false);
   }
@@ -123,8 +147,7 @@ export default function ManagerRoster() {
       title: 'Shift removed',
       message: `A shift on ${format(selectedDay, 'EEE d MMM')} has been removed.`,
     }).then(() => {});
-    fetchShifts();
-    fetchUpcoming();
+    fetchShifts(); fetchUpcoming();
   }
 
   async function previewRecurringShifts() {
@@ -136,8 +159,7 @@ export default function ManagerRoster() {
       .gte('date', lastStart).lte('date', lastEnd)
       .eq('is_recurring', true);
     if (!lastMonthShifts || lastMonthShifts.length === 0) {
-      alert(`No recurring shifts found in ${format(lastMonth, 'MMMM yyyy')}.`);
-      return;
+      alert(`No recurring shifts found in ${format(lastMonth, 'MMMM yyyy')}.`); return;
     }
     const currentDays = eachDayOfInterval({ start: startOfMonth(currentMonth), end: endOfMonth(currentMonth) });
     const daysByWeekday = {};
@@ -155,11 +177,9 @@ export default function ManagerRoster() {
     });
     const preview = [];
     uniqueShifts.forEach(shift => {
-      const matchingDays = daysByWeekday[shift.dow] || [];
-      matchingDays.forEach(day => {
+      (daysByWeekday[shift.dow] || []).forEach(day => {
         const newDate = format(day, 'yyyy-MM-dd');
-        const alreadyExists = shifts.some(s => s.staff_id === shift.staff_id && s.date === newDate);
-        if (!alreadyExists) {
+        if (!shifts.some(s => s.staff_id === shift.staff_id && s.date === newDate)) {
           preview.push({
             staff_id: shift.staff_id, staff_name: shift.staff?.full_name,
             date: newDate, start_time: shift.start_time, end_time: shift.end_time,
@@ -169,8 +189,7 @@ export default function ManagerRoster() {
       });
     });
     if (preview.length === 0) {
-      alert(`All recurring shifts from ${format(lastMonth, 'MMMM')} already exist in ${format(currentMonth, 'MMMM yyyy')}.`);
-      return;
+      alert(`All recurring shifts from ${format(lastMonth, 'MMMM')} already exist in ${format(currentMonth, 'MMMM yyyy')}.`); return;
     }
     preview.sort((a, b) => a.date.localeCompare(b.date) || a.start_time.localeCompare(b.start_time));
     setRecurringPreview({ shifts: preview, copying: false });
@@ -178,12 +197,13 @@ export default function ManagerRoster() {
 
   async function confirmCopyRecurring() {
     setRecurringPreview(p => ({ ...p, copying: true }));
-    const toInsert = recurringPreview.shifts.map(s => ({
-      staff_id: s.staff_id, date: s.date, start_time: s.start_time,
-      end_time: s.end_time, title: s.title, notes: s.notes,
-      is_recurring: true, created_by: profile.id,
-    }));
-    const { error } = await supabase.from('shifts').insert(toInsert);
+    const { error } = await supabase.from('shifts').insert(
+      recurringPreview.shifts.map(s => ({
+        staff_id: s.staff_id, date: s.date, start_time: s.start_time,
+        end_time: s.end_time, title: s.title, notes: s.notes,
+        is_recurring: true, created_by: profile.id,
+      }))
+    );
     if (!error) { fetchShifts(); fetchUpcoming(); setRecurringPreview(null); }
     else { alert('Error copying shifts. Please try again.'); setRecurringPreview(p => ({ ...p, copying: false })); }
   }
@@ -196,8 +216,6 @@ export default function ManagerRoster() {
   const dayShifts = shifts.filter(s => s.date === format(selectedDay, 'yyyy-MM-dd'));
   const dayUnavailable = unavailability[format(selectedDay, 'yyyy-MM-dd')] || [];
   const lastMonthName = format(subMonths(currentMonth, 1), 'MMMM');
-
-  // Group upcoming by date
   const upcomingByDate = {};
   upcomingShifts.forEach(s => {
     if (!upcomingByDate[s.date]) upcomingByDate[s.date] = [];
@@ -242,12 +260,9 @@ export default function ManagerRoster() {
             const hasUnavail = !!unavailability[dateStr];
             const selected = isSameDay(day, selectedDay);
             return (
-              <div
-                key={dateStr}
+              <div key={dateStr}
                 className={`cal-day ${isToday(day) ? 'today' : ''} ${hasShift ? 'has-shift' : ''} ${selected ? 'selected' : ''}`}
-                onClick={() => setSelectedDay(day)}
-                style={{ position: 'relative' }}
-              >
+                onClick={() => setSelectedDay(day)} style={{ position: 'relative' }}>
                 {format(day, 'd')}
                 {hasUnavail && (
                   <span style={{ position: 'absolute', top: 1, right: 2, fontSize: '0.55rem', color: 'var(--danger)', fontWeight: 900, lineHeight: 1 }}>✕</span>
@@ -265,7 +280,6 @@ export default function ManagerRoster() {
           <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>{dayShifts.length} shift{dayShifts.length !== 1 ? 's' : ''}</span>
         </div>
 
-        {/* Unavailability notice */}
         {dayUnavailable.length > 0 && (
           <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid var(--danger)', borderRadius: 'var(--radius)', padding: '0.5rem 0.8rem', marginBottom: '0.6rem', fontSize: '0.82rem', color: 'var(--danger)' }}>
             ✕ Unavailable: {dayUnavailable.join(', ')}
@@ -285,8 +299,13 @@ export default function ManagerRoster() {
                 </div>
                 <div className="shift-role">{shift.title || 'Shift'}</div>
               </div>
+              {/* Duplicate button */}
+              <button
+                onClick={() => setDuplicateShift({ ...shift, start_time: shift.start_time.slice(0,5), end_time: shift.end_time.slice(0,5), dupDate: '', dupStaffId: shift.staff_id })}
+                title="Duplicate shift"
+                style={{ background: 'none', color: 'var(--text-dim)', fontSize: '0.85rem', padding: '0.2rem 0.4rem' }}>⧉</button>
               <button onClick={() => setEditShift({ ...shift, start_time: shift.start_time.slice(0,5), end_time: shift.end_time.slice(0,5) })}
-                style={{ background: 'none', color: 'var(--accent)', fontSize: '0.85rem', padding: '0.2rem 0.4rem', marginRight: '0.2rem' }}>✏️</button>
+                style={{ background: 'none', color: 'var(--accent)', fontSize: '0.85rem', padding: '0.2rem 0.4rem' }}>✏️</button>
               <button onClick={() => deleteShift(shift.id, shift.staff_id)}
                 style={{ background: 'none', color: 'var(--danger)', fontSize: '1.2rem', padding: '0.2rem 0.4rem' }}>×</button>
             </div>
@@ -336,14 +355,10 @@ export default function ManagerRoster() {
               </select>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem' }}>
-              <div className="form-group">
-                <label>Start</label>
-                <input type="time" value={newShift.start_time} onChange={e => setNewShift({...newShift, start_time: e.target.value})} />
-              </div>
-              <div className="form-group">
-                <label>End</label>
-                <input type="time" value={newShift.end_time} onChange={e => setNewShift({...newShift, end_time: e.target.value})} />
-              </div>
+              <div className="form-group"><label>Start</label>
+                <input type="time" value={newShift.start_time} onChange={e => setNewShift({...newShift, start_time: e.target.value})} /></div>
+              <div className="form-group"><label>End</label>
+                <input type="time" value={newShift.end_time} onChange={e => setNewShift({...newShift, end_time: e.target.value})} /></div>
             </div>
             <div className="form-group">
               <label>Shift Title (optional)</label>
@@ -351,7 +366,7 @@ export default function ManagerRoster() {
             </div>
             <div className="form-group">
               <label>Notes (optional)</label>
-              <textarea rows={2} placeholder="Any notes for this shift…" value={newShift.notes} onChange={e => setNewShift({...newShift, notes: e.target.value})} style={{ resize: 'none' }} />
+              <textarea rows={2} value={newShift.notes} onChange={e => setNewShift({...newShift, notes: e.target.value})} style={{ resize: 'none' }} />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1rem' }}>
               <input type="checkbox" id="recurring" style={{ width: 'auto' }} checked={newShift.is_recurring} onChange={e => setNewShift({...newShift, is_recurring: e.target.checked})} />
@@ -378,22 +393,18 @@ export default function ManagerRoster() {
               </select>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem' }}>
-              <div className="form-group">
-                <label>Start</label>
-                <input type="time" value={editShift.start_time} onChange={e => setEditShift({...editShift, start_time: e.target.value})} />
-              </div>
-              <div className="form-group">
-                <label>End</label>
-                <input type="time" value={editShift.end_time} onChange={e => setEditShift({...editShift, end_time: e.target.value})} />
-              </div>
+              <div className="form-group"><label>Start</label>
+                <input type="time" value={editShift.start_time} onChange={e => setEditShift({...editShift, start_time: e.target.value})} /></div>
+              <div className="form-group"><label>End</label>
+                <input type="time" value={editShift.end_time} onChange={e => setEditShift({...editShift, end_time: e.target.value})} /></div>
             </div>
             <div className="form-group">
               <label>Shift Title (optional)</label>
-              <input type="text" placeholder="e.g. Morning, Floor supervisor…" value={editShift.title || ''} onChange={e => setEditShift({...editShift, title: e.target.value})} />
+              <input type="text" value={editShift.title || ''} onChange={e => setEditShift({...editShift, title: e.target.value})} />
             </div>
             <div className="form-group">
               <label>Notes (optional)</label>
-              <textarea rows={2} placeholder="Any notes for this shift…" value={editShift.notes || ''} onChange={e => setEditShift({...editShift, notes: e.target.value})} style={{ resize: 'none' }} />
+              <textarea rows={2} value={editShift.notes || ''} onChange={e => setEditShift({...editShift, notes: e.target.value})} style={{ resize: 'none' }} />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1rem' }}>
               <input type="checkbox" id="edit-recurring" style={{ width: 'auto' }} checked={editShift.is_recurring} onChange={e => setEditShift({...editShift, is_recurring: e.target.checked})} />
@@ -403,6 +414,41 @@ export default function ManagerRoster() {
               <button className="btn btn-ghost btn-full" onClick={() => setEditShift(null)}>Cancel</button>
               <button className="btn btn-primary btn-full" onClick={saveEditShift} disabled={!editShift.staff_id || saving}>
                 {saving ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Duplicate Shift Modal */}
+      {duplicateShift && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setDuplicateShift(null)}>
+          <div className="modal-sheet">
+            <div className="modal-handle" />
+            <h2 style={{ fontWeight: 800, marginBottom: '0.4rem' }}>Duplicate Shift</h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)', marginBottom: '1.2rem' }}>
+              {duplicateShift.start_time}–{duplicateShift.end_time} · {duplicateShift.title || 'Shift'}
+            </p>
+            <div className="form-group">
+              <label>Copy to Date</label>
+              <input type="date" value={duplicateShift.dupDate}
+                onChange={e => setDuplicateShift({...duplicateShift, dupDate: e.target.value})} />
+            </div>
+            <div className="form-group">
+              <label>Staff Member</label>
+              <select value={duplicateShift.dupStaffId} onChange={e => setDuplicateShift({...duplicateShift, dupStaffId: e.target.value})}>
+                <option value="">Select staff…</option>
+                {staff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+              </select>
+            </div>
+            <div style={{ background: 'var(--surface2)', borderRadius: 'var(--radius)', padding: '0.6rem 0.8rem', marginBottom: '1rem', fontSize: '0.82rem', color: 'var(--text-dim)' }}>
+              Times and title will be copied as-is. You can edit after saving.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem' }}>
+              <button className="btn btn-ghost btn-full" onClick={() => setDuplicateShift(null)}>Cancel</button>
+              <button className="btn btn-primary btn-full" onClick={saveDuplicate}
+                disabled={!duplicateShift.dupDate || !duplicateShift.dupStaffId || saving}>
+                {saving ? 'Saving…' : 'Duplicate'}
               </button>
             </div>
           </div>
