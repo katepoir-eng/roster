@@ -1,20 +1,34 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import BottomNav from '../components/BottomNav';
 import { format } from 'date-fns';
 
+const INTEREST_OPTIONS = [
+  { value: 'happy', emoji: '😊🔄', label: 'Happy' },
+  { value: 'good', emoji: '👍', label: 'Good' },
+  { value: 'change_please', emoji: '😕🔄', label: 'Change please' },
+];
+
 export default function Noticeboard() {
-  const { profile, loading } = useAuth();
+  const { profile, realProfile, loading } = useAuth();
   const router = useRouter();
   const [threads, setThreads] = useState([]);
+  const [teamStatus, setTeamStatus] = useState([]);
   const [expanded, setExpanded] = useState({});
   const [replies, setReplies] = useState({});
   const [replyText, setReplyText] = useState({});
   const [newMessage, setNewMessage] = useState('');
   const [showNewThread, setShowNewThread] = useState(false);
   const [posting, setPosting] = useState(false);
+  const [allProfiles, setAllProfiles] = useState([]);
+  // @ mention state
+  const [mentionQuery, setMentionQuery] = useState(''); // current @word being typed
+  const [mentionTarget, setMentionTarget] = useState(null); // 'new' | thread_id
+  const [mentionField, setMentionField] = useState(''); // which textarea
+  const newMsgRef = useRef(null);
+  const replyRefs = useRef({});
 
   useEffect(() => {
     if (!loading && !profile) router.replace('/');
@@ -23,7 +37,8 @@ export default function Noticeboard() {
   useEffect(() => {
     if (!profile) return;
     fetchThreads();
-    // Mark noticeboard as visited
+    fetchTeamStatus();
+    fetchAllProfiles();
     localStorage.setItem('noticeboard_last_visit', new Date().toISOString());
   }, [profile]);
 
@@ -33,6 +48,20 @@ export default function Noticeboard() {
       .select('*, author:profiles!threads_author_id_fkey(full_name, role)')
       .order('created_at', { ascending: false });
     setThreads(data || []);
+  }
+
+  async function fetchTeamStatus() {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, full_name, role, interest_level')
+      .eq('role', 'staff')
+      .order('full_name');
+    setTeamStatus(data || []);
+  }
+
+  async function fetchAllProfiles() {
+    const { data } = await supabase.from('profiles').select('id, full_name').order('full_name');
+    setAllProfiles(data || []);
   }
 
   async function fetchReplies(threadId) {
@@ -50,11 +79,56 @@ export default function Noticeboard() {
     if (isExpanding && !replies[threadId]) fetchReplies(threadId);
   }
 
+  // Handle @ mention detection in any textarea
+  function handleTextChange(val, field, threadId = null) {
+    if (field === 'new') setNewMessage(val);
+    else setReplyText(r => ({ ...r, [threadId]: val }));
+
+    // Detect @mention
+    const atIndex = val.lastIndexOf('@');
+    if (atIndex !== -1) {
+      const afterAt = val.slice(atIndex + 1);
+      if (!afterAt.includes(' ') || afterAt === '') {
+        setMentionQuery(afterAt.toLowerCase());
+        setMentionTarget(threadId || 'new');
+        setMentionField(field);
+        return;
+      }
+    }
+    setMentionQuery('');
+    setMentionTarget(null);
+  }
+
+  function getMentionSuggestions() {
+    const allOption = { id: 'all', full_name: 'all' };
+    const filtered = [allOption, ...allProfiles].filter(p =>
+      p.id !== profile.id &&
+      p.full_name.toLowerCase().includes(mentionQuery)
+    );
+    return filtered.slice(0, 5);
+  }
+
+  function insertMention(selectedProfile, threadId) {
+    const mention = `@${selectedProfile.full_name} `;
+    if (mentionField === 'new') {
+      const atIndex = newMessage.lastIndexOf('@');
+      const newVal = newMessage.slice(0, atIndex) + mention;
+      setNewMessage(newVal);
+    } else {
+      const current = replyText[threadId] || '';
+      const atIndex = current.lastIndexOf('@');
+      const newVal = current.slice(0, atIndex) + mention;
+      setReplyText(r => ({ ...r, [threadId]: newVal }));
+    }
+    setMentionQuery('');
+    setMentionTarget(null);
+  }
+
   async function postThread() {
     if (!newMessage.trim()) return;
     setPosting(true);
     await supabase.from('threads').insert({
-      author_id: profile.id,
+      author_id: realProfile?.id || profile.id,
       message: newMessage.trim(),
     });
     setNewMessage('');
@@ -68,12 +142,11 @@ export default function Noticeboard() {
     if (!text) return;
     await supabase.from('thread_replies').insert({
       thread_id: threadId,
-      author_id: profile.id,
+      author_id: realProfile?.id || profile.id,
       message: text,
     });
     setReplyText(r => ({ ...r, [threadId]: '' }));
     fetchReplies(threadId);
-    // Refresh thread list to update latest activity
     fetchThreads();
   }
 
@@ -89,7 +162,21 @@ export default function Noticeboard() {
     fetchReplies(threadId);
   }
 
+  const isReallyManager = realProfile?.role === 'manager';
+
+  // Render message text with highlighted @mentions
+  function renderMessage(text) {
+    const parts = text.split(/(@\w[\w\s]*)/g);
+    return parts.map((part, i) =>
+      part.startsWith('@')
+        ? <span key={i} style={{ color: 'var(--accent)', fontWeight: 700 }}>{part}</span>
+        : part
+    );
+  }
+
   if (loading || !profile) return <div className="spinner" />;
+
+  const suggestions = mentionQuery !== null && mentionTarget !== null ? getMentionSuggestions() : [];
 
   return (
     <div className="container page-content">
@@ -98,6 +185,29 @@ export default function Noticeboard() {
         <button className="btn btn-primary" onClick={() => setShowNewThread(true)}>+ Post</button>
       </div>
 
+      {/* Team Status */}
+      {teamStatus.length > 0 && (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          <div style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: '0.6rem' }}>
+            Team Status
+          </div>
+          {teamStatus.map(member => {
+            const opt = INTEREST_OPTIONS.find(o => o.value === member.interest_level);
+            return (
+              <div key={member.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.35rem 0', borderBottom: '1px solid var(--border)' }}>
+                <span style={{ fontSize: '0.88rem', fontWeight: 600 }}>{member.full_name}</span>
+                {opt ? (
+                  <span style={{ fontSize: '0.82rem', color: 'var(--text-dim)' }}>{opt.emoji} {opt.label}</span>
+                ) : (
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', fontStyle: 'italic' }}>Not set</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Threads */}
       {threads.length === 0 && (
         <div className="empty-state">
           <p>No posts yet.<br />Tap + Post to start a thread.</p>
@@ -107,12 +217,13 @@ export default function Noticeboard() {
       {threads.map(thread => {
         const isOpen = expanded[thread.id];
         const threadReplies = replies[thread.id] || [];
-        const isAuthor = thread.author_id === profile.id;
-        const isManager = profile.role === 'manager';
+        const isAuthor = thread.author_id === (realProfile?.id || profile.id);
+        const canDelete = isAuthor || isReallyManager;
+        const showMentions = mentionTarget === thread.id && suggestions.length > 0;
 
         return (
-          <div key={thread.id} className="card" style={{ marginBottom: '0.8rem', padding: 0, overflow: 'hidden' }}>
-            {/* Thread header — always visible */}
+          <div key={thread.id} className="card" style={{ marginBottom: '0.8rem', padding: 0, overflow: 'visible' }}>
+            {/* Thread header */}
             <div
               onClick={() => toggleExpand(thread.id)}
               style={{ padding: '1rem', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}
@@ -133,63 +244,80 @@ export default function Noticeboard() {
                   WebkitBoxOrient: 'vertical',
                   margin: 0,
                 }}>
-                  {thread.message}
+                  {renderMessage(thread.message)}
                 </p>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.3rem', flexShrink: 0 }}>
-                <span style={{ fontSize: '0.75rem', color: 'var(--accent)', fontWeight: 600 }}>
-                  {isOpen ? '▲ Hide' : '▼ Expand'}
-                </span>
-              </div>
+              <span style={{ fontSize: '0.75rem', color: 'var(--accent)', fontWeight: 600, flexShrink: 0 }}>
+                {isOpen ? '▲ Hide' : '▼ Expand'}
+              </span>
             </div>
 
-            {/* Expanded: replies + reply box */}
+            {/* Expanded */}
             {isOpen && (
               <div style={{ borderTop: '1px solid var(--border)' }}>
                 {threadReplies.length > 0 && (
                   <div style={{ padding: '0.5rem 1rem' }}>
-                    {threadReplies.map(reply => (
-                      <div key={reply.id} style={{ padding: '0.6rem 0', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.2rem', flexWrap: 'wrap' }}>
-                            <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{reply.author?.full_name}</span>
-                            {reply.author?.role === 'manager' && (
-                              <span style={{ fontSize: '0.65rem', background: 'var(--accent-dim)', color: 'var(--accent)', borderRadius: '0.3rem', padding: '0.1rem 0.3rem', fontWeight: 700 }}>MGR</span>
-                            )}
-                            <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{format(new Date(reply.created_at), 'd MMM, h:mm a')}</span>
+                    {threadReplies.map(reply => {
+                      const isReplyAuthor = reply.author_id === (realProfile?.id || profile.id);
+                      const canDeleteReply = isReplyAuthor || isReallyManager;
+                      return (
+                        <div key={reply.id} style={{ padding: '0.6rem 0', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.2rem', flexWrap: 'wrap' }}>
+                              <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{reply.author?.full_name}</span>
+                              {reply.author?.role === 'manager' && (
+                                <span style={{ fontSize: '0.65rem', background: 'var(--accent-dim)', color: 'var(--accent)', borderRadius: '0.3rem', padding: '0.1rem 0.3rem', fontWeight: 700 }}>MGR</span>
+                              )}
+                              <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{format(new Date(reply.created_at), 'd MMM, h:mm a')}</span>
+                            </div>
+                            <p style={{ fontSize: '0.85rem', margin: 0 }}>{renderMessage(reply.message)}</p>
                           </div>
-                          <p style={{ fontSize: '0.85rem', margin: 0 }}>{reply.message}</p>
+                          {canDeleteReply && (
+                            <button onClick={() => deleteReply(reply.id, thread.id)} style={{ background: 'none', color: 'var(--danger)', fontSize: '1rem', padding: '0 0.3rem', flexShrink: 0 }}>×</button>
+                          )}
                         </div>
-                        {(reply.author_id === profile.id || isManager) && (
-                          <button onClick={() => deleteReply(reply.id, thread.id)} style={{ background: 'none', color: 'var(--danger)', fontSize: '1rem', padding: '0 0.3rem', flexShrink: 0 }}>×</button>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 
-                {/* Reply input */}
-                <div style={{ padding: '0.75rem 1rem', display: 'flex', gap: '0.5rem' }}>
-                  <input
-                    type="text"
-                    placeholder="Write a reply…"
-                    value={replyText[thread.id] || ''}
-                    onChange={e => setReplyText(r => ({ ...r, [thread.id]: e.target.value }))}
-                    onKeyDown={e => e.key === 'Enter' && postReply(thread.id)}
-                    style={{ flex: 1, fontSize: '0.88rem' }}
-                  />
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => postReply(thread.id)}
-                    disabled={!replyText[thread.id]?.trim()}
-                    style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
-                  >
-                    Reply
-                  </button>
+                {/* Reply input with @ mention */}
+                <div style={{ padding: '0.75rem 1rem', position: 'relative' }}>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <input
+                      type="text"
+                      placeholder="Reply… (type @ to mention)"
+                      value={replyText[thread.id] || ''}
+                      onChange={e => handleTextChange(e.target.value, thread.id, thread.id)}
+                      onKeyDown={e => e.key === 'Enter' && !showMentions && postReply(thread.id)}
+                      style={{ flex: 1, fontSize: '0.88rem' }}
+                    />
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => postReply(thread.id)}
+                      disabled={!replyText[thread.id]?.trim()}
+                      style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
+                    >
+                      Reply
+                    </button>
+                  </div>
+                  {/* @ mention dropdown */}
+                  {showMentions && (
+                    <div style={{ position: 'absolute', bottom: '100%', left: '1rem', right: '1rem', background: 'var(--surface)', border: '1px solid var(--accent)', borderRadius: '0.5rem', zIndex: 100, overflow: 'hidden' }}>
+                      {suggestions.map(s => (
+                        <div
+                          key={s.id}
+                          onClick={() => insertMention(s, thread.id)}
+                          style={{ padding: '0.6rem 1rem', cursor: 'pointer', fontSize: '0.88rem', fontWeight: 600, borderBottom: '1px solid var(--border)' }}
+                        >
+                          {s.id === 'all' ? '👥 @all — mention everyone' : `@${s.full_name}`}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                {/* Delete thread — author or manager */}
-                {(isAuthor || isManager) && (
+                {canDelete && (
                   <div style={{ padding: '0 1rem 0.75rem', textAlign: 'right' }}>
                     <button onClick={() => deleteThread(thread.id)} style={{ fontSize: '0.75rem', color: 'var(--danger)', background: 'none' }}>
                       Delete thread
@@ -205,19 +333,34 @@ export default function Noticeboard() {
       {/* New Thread Modal */}
       {showNewThread && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowNewThread(false)}>
-          <div className="modal-sheet">
+          <div className="modal-sheet" style={{ position: 'relative' }}>
             <div className="modal-handle" />
             <h2 style={{ fontWeight: 800, marginBottom: '1rem' }}>New Post</h2>
-            <div className="form-group">
-              <label>Message</label>
+            <div className="form-group" style={{ position: 'relative' }}>
+              <label>Message (type @ to mention someone)</label>
               <textarea
+                ref={newMsgRef}
                 rows={4}
-                placeholder="Write your message to the team…"
+                placeholder="Write your message… @name to mention"
                 value={newMessage}
-                onChange={e => setNewMessage(e.target.value)}
+                onChange={e => handleTextChange(e.target.value, 'new')}
                 style={{ resize: 'none' }}
                 autoFocus
               />
+              {/* @ mention dropdown for new thread */}
+              {mentionTarget === 'new' && suggestions.length > 0 && (
+                <div style={{ position: 'absolute', bottom: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--accent)', borderRadius: '0.5rem', zIndex: 100, overflow: 'hidden' }}>
+                  {suggestions.map(s => (
+                    <div
+                      key={s.id}
+                      onClick={() => insertMention(s, null)}
+                      style={{ padding: '0.6rem 1rem', cursor: 'pointer', fontSize: '0.88rem', fontWeight: 600, borderBottom: '1px solid var(--border)' }}
+                    >
+                      {s.id === 'all' ? '👥 @all — mention everyone' : `@${s.full_name}`}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem' }}>
               <button className="btn btn-ghost btn-full" onClick={() => setShowNewThread(false)}>Cancel</button>
