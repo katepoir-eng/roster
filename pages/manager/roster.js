@@ -13,9 +13,10 @@ export default function ManagerRoster() {
   const [shifts, setShifts] = useState([]);
   const [staff, setStaff] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [editShift, setEditShift] = useState(null); // shift being edited
+  const [editShift, setEditShift] = useState(null);
   const [newShift, setNewShift] = useState({ staff_id: '', start_time: '09:00', end_time: '17:00', title: '', notes: '', is_recurring: false });
   const [saving, setSaving] = useState(false);
+  const [recurringPreview, setRecurringPreview] = useState(null); // { shifts: [], copying: false }
 
   useEffect(() => {
     if (!loading && (!profile || profile.role !== 'manager')) router.replace('/');
@@ -30,7 +31,7 @@ export default function ManagerRoster() {
   async function fetchShifts() {
     const start = format(startOfMonth(currentMonth), 'yyyy-MM-dd');
     const end = format(endOfMonth(currentMonth), 'yyyy-MM-dd');
-    const { data, error } = await supabase.from('shifts')
+    const { data } = await supabase.from('shifts')
       .select('*, staff:profiles!shifts_staff_id_fkey(full_name)')
       .gte('date', start).lte('date', end);
     setShifts(data || []);
@@ -94,12 +95,91 @@ export default function ManagerRoster() {
     fetchShifts();
   }
 
+  async function previewRecurringShifts() {
+    const lastMonth = subMonths(currentMonth, 1);
+    const lastStart = format(startOfMonth(lastMonth), 'yyyy-MM-dd');
+    const lastEnd = format(endOfMonth(lastMonth), 'yyyy-MM-dd');
+
+    const { data: lastMonthShifts } = await supabase.from('shifts')
+      .select('*, staff:profiles!shifts_staff_id_fkey(full_name)')
+      .gte('date', lastStart).lte('date', lastEnd)
+      .eq('is_recurring', true);
+
+    if (!lastMonthShifts || lastMonthShifts.length === 0) {
+      alert(`No recurring shifts found in ${format(lastMonth, 'MMMM yyyy')}.`);
+      return;
+    }
+
+    // Get all days in current month grouped by day of week
+    const currentDays = eachDayOfInterval({ start: startOfMonth(currentMonth), end: endOfMonth(currentMonth) });
+    const daysByWeekday = {};
+    currentDays.forEach(day => {
+      const dow = getDay(day);
+      if (!daysByWeekday[dow]) daysByWeekday[dow] = [];
+      daysByWeekday[dow].push(day);
+    });
+
+    // Map each recurring shift to matching weekdays in current month
+    const preview = [];
+    lastMonthShifts.forEach(shift => {
+      const shiftDow = getDay(new Date(shift.date + 'T12:00:00'));
+      const matchingDays = daysByWeekday[shiftDow] || [];
+      matchingDays.forEach(day => {
+        const newDate = format(day, 'yyyy-MM-dd');
+        const alreadyExists = shifts.some(s => s.staff_id === shift.staff_id && s.date === newDate);
+        if (!alreadyExists) {
+          preview.push({
+            staff_id: shift.staff_id,
+            staff_name: shift.staff?.full_name,
+            date: newDate,
+            start_time: shift.start_time,
+            end_time: shift.end_time,
+            title: shift.title,
+            notes: shift.notes,
+            is_recurring: true,
+          });
+        }
+      });
+    });
+
+    if (preview.length === 0) {
+      alert(`All recurring shifts from ${format(lastMonth, 'MMMM')} already exist in ${format(currentMonth, 'MMMM yyyy')}.`);
+      return;
+    }
+
+    preview.sort((a, b) => a.date.localeCompare(b.date) || a.start_time.localeCompare(b.start_time));
+    setRecurringPreview({ shifts: preview, copying: false });
+  }
+
+  async function confirmCopyRecurring() {
+    setRecurringPreview(p => ({ ...p, copying: true }));
+    const toInsert = recurringPreview.shifts.map(s => ({
+      staff_id: s.staff_id,
+      date: s.date,
+      start_time: s.start_time,
+      end_time: s.end_time,
+      title: s.title,
+      notes: s.notes,
+      is_recurring: true,
+      created_by: profile.id,
+    }));
+    const { error } = await supabase.from('shifts').insert(toInsert);
+    if (!error) {
+      fetchShifts();
+      setRecurringPreview(null);
+    } else {
+      alert('Error copying shifts. Please try again.');
+      setRecurringPreview(p => ({ ...p, copying: false }));
+    }
+  }
+
   if (loading || !profile) return <div className="spinner" />;
 
   const days = eachDayOfInterval({ start: startOfMonth(currentMonth), end: endOfMonth(currentMonth) });
   const startPad = getDay(days[0]);
   const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
   const dayShifts = shifts.filter(s => s.date === format(selectedDay, 'yyyy-MM-dd'));
+  const lastMonthName = format(subMonths(currentMonth, 1), 'MMMM');
 
   return (
     <div className="container page-content">
@@ -117,6 +197,17 @@ export default function ManagerRoster() {
         <button className="btn btn-ghost" style={{ padding: '0.4rem 0.8rem' }} onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}>‹</button>
         <span style={{ fontWeight: 700, fontSize: '1rem' }}>{format(currentMonth, 'MMMM yyyy')}</span>
         <button className="btn btn-ghost" style={{ padding: '0.4rem 0.8rem' }} onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}>›</button>
+      </div>
+
+      {/* Recurring shifts banner */}
+      <div style={{ marginBottom: '0.8rem' }}>
+        <button
+          className="btn btn-ghost btn-full"
+          onClick={previewRecurringShifts}
+          style={{ fontSize: '0.85rem', color: 'var(--accent)', borderColor: 'var(--accent-dim)' }}
+        >
+          🔁 Copy recurring shifts from {lastMonthName}
+        </button>
       </div>
 
       {/* Calendar */}
@@ -159,7 +250,10 @@ export default function ManagerRoster() {
             <div key={shift.id} className="shift-item">
               <div className="shift-time mono">{shift.start_time.slice(0,5)}–{shift.end_time.slice(0,5)}</div>
               <div className="shift-info">
-                <div className="shift-name">{shift.staff?.full_name}</div>
+                <div className="shift-name">
+                  {shift.staff?.full_name}
+                  {shift.is_recurring && <span style={{ marginLeft: '0.4rem', fontSize: '0.7rem', color: 'var(--accent)' }}>🔁</span>}
+                </div>
                 <div className="shift-role">{shift.title || 'Shift'}</div>
               </div>
               <button
@@ -265,6 +359,39 @@ export default function ManagerRoster() {
               <button className="btn btn-ghost btn-full" onClick={() => setEditShift(null)}>Cancel</button>
               <button className="btn btn-primary btn-full" onClick={saveEditShift} disabled={!editShift.staff_id || saving}>
                 {saving ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Recurring Preview Modal */}
+      {recurringPreview && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setRecurringPreview(null)}>
+          <div className="modal-sheet" style={{ maxHeight: '80vh', overflowY: 'auto' }}>
+            <div className="modal-handle" />
+            <h2 style={{ fontWeight: 800, marginBottom: '0.4rem' }}>Copy Recurring Shifts</h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)', marginBottom: '1rem' }}>
+              {recurringPreview.shifts.length} shift{recurringPreview.shifts.length !== 1 ? 's' : ''} will be created in {format(currentMonth, 'MMMM yyyy')}:
+            </p>
+
+            {recurringPreview.shifts.map((s, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', borderBottom: '1px solid var(--border)' }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{s.staff_name}</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>{s.title || 'Shift'}</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{format(new Date(s.date + 'T12:00:00'), 'EEE d MMM')}</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>{s.start_time.slice(0,5)}–{s.end_time.slice(0,5)}</div>
+                </div>
+              </div>
+            ))}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem', marginTop: '1.2rem' }}>
+              <button className="btn btn-ghost btn-full" onClick={() => setRecurringPreview(null)}>Cancel</button>
+              <button className="btn btn-primary btn-full" onClick={confirmCopyRecurring} disabled={recurringPreview.copying}>
+                {recurringPreview.copying ? 'Copying…' : 'Confirm & Copy'}
               </button>
             </div>
           </div>
