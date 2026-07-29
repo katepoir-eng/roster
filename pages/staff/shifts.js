@@ -59,7 +59,7 @@ export default function StaffShifts() {
   async function fetchLatestThread() {
     const { data } = await supabase
       .from('threads')
-      .select('*, author:profiles!threads_created_by_fkey(full_name)')
+      .select('*, author:profiles!threads_author_id_fkey(full_name)')
       .order('created_at', { ascending: false })
       .limit(1)
       .single();
@@ -181,7 +181,7 @@ export default function StaffShifts() {
             {latestThread.author?.full_name} · {format(new Date(latestThread.created_at), 'd MMM')}
           </div>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)', margin: 0, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-            {latestThread.title}
+            {latestThread.message}
           </p>
         </div>
       )}
