@@ -12,7 +12,7 @@ export default function ManagerSwaps() {
   const [filter, setFilter] = useState('pending');
 
   useEffect(() => {
-    if (!loading && (!profile || profile.role !== 'manager')) router.replace('/');
+    if (!loading && (!profile || profile.role !== 'manager' && profile.role !== 'admin')) router.replace('/');
   }, [profile, loading]);
 
   useEffect(() => {
