@@ -113,7 +113,7 @@ export default function StaffShifts() {
       target_staff_id: targetStaff || null,
       note: swapNote,
     });
-    const { data: managers } = await supabase.from('profiles').select('id').eq('role', 'manager');
+    const { data: managers } = await supabase.from('profiles').select('id').in('role', ['manager','admin']);
     if (managers) {
       await supabase.from('notifications').insert(
         managers.map(m => ({
