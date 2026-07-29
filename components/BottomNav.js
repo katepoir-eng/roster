@@ -30,7 +30,7 @@ export default function BottomNav() {
   const totalBadge = unread + unreadThreads;
 
   // Staff view mode banner + staff nav
-  if (staffViewMode && realProfile?.role === 'manager') {
+  if (staffViewMode && ['manager','admin'].includes(realProfile?.role)) {
     return (
       <>
         <div
@@ -62,7 +62,7 @@ export default function BottomNav() {
     );
   }
 
-  if (profile?.role === 'manager') {
+  if (['manager','admin'].includes(profile?.role)) {
     return (
       <nav className="bottom-nav">
         <Link href="/manager/roster" className={isActive('/manager/roster') ? 'active' : ''}>
