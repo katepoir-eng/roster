@@ -41,7 +41,7 @@ export default function ManagerStaff() {
   const [copiedSQL, setCopiedSQL] = useState(false);
 
   useEffect(() => {
-    if (!loading && (!profile || profile.role !== 'manager')) router.replace('/');
+    if (!loading && (!profile || !['manager','admin'].includes(profile.role))) router.replace('/');
   }, [profile, loading]);
 
   useEffect(() => {
