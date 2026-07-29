@@ -32,7 +32,7 @@ export default function Profile() {
     await supabase.from('profiles').update({ interest_level: val }).eq('id', profile.id);
 
     if (oldLevel !== val) {
-      const { data: managers } = await supabase.from('profiles').select('id').eq('role', 'manager');
+      const { data: managers } = await supabase.from('profiles').select('id').in('role', ['manager','admin']);
       if (managers?.length) {
         const selected = INTEREST_OPTIONS.find(o => o.value === val);
         await Promise.all(managers.map(m =>
@@ -65,7 +65,7 @@ export default function Profile() {
   if (loading || !profile) return <div className="spinner" />;
 
   // Use realProfile to check actual role (staffViewMode spoofs role)
-  const isReallyManager = realProfile?.role === 'manager';
+  const isReallyManager = ['manager','admin'].includes(realProfile?.role);
 
   return (
     <div className="container page-content" style={{ paddingTop: staffViewMode ? '3rem' : undefined }}>
