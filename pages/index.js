@@ -12,7 +12,7 @@ export default function LoginPage() {
 
   // Redirect if already logged in
   if (typeof window !== 'undefined' && profile) {
-    router.replace(profile.role === 'manager' ? '/manager/roster' : '/staff/shifts');
+    router.replace(['manager','admin'].includes(profile.role) ? '/manager/roster' : '/staff/shifts');
     return null;
   }
 
