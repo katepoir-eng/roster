@@ -275,7 +275,7 @@ export default function Noticeboard() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.3rem', flexWrap: 'wrap' }}>
                     <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>{thread.author?.full_name}</span>
-                    {thread.['manager','admin'].includes(author?.role) && (
+                    {['manager','admin'].includes(thread.author?.role) && (
                       <span style={{ fontSize: '0.7rem', background: 'var(--accent-dim)', color: 'var(--accent)', borderRadius: '0.3rem', padding: '0.1rem 0.4rem', fontWeight: 700 }}>MGR</span>
                     )}
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{format(new Date(thread.created_at), 'd MMM yyyy')}</span>
@@ -312,7 +312,7 @@ export default function Noticeboard() {
                             <div style={{ flex: 1 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.2rem', flexWrap: 'wrap' }}>
                                 <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{reply.author?.full_name}</span>
-                                {reply.['manager','admin'].includes(author?.role) && (
+                                {['manager','admin'].includes(reply.author?.role) && (
                                   <span style={{ fontSize: '0.65rem', background: 'var(--accent-dim)', color: 'var(--accent)', borderRadius: '0.3rem', padding: '0.1rem 0.3rem', fontWeight: 700 }}>MGR</span>
                                 )}
                                 <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{format(new Date(reply.created_at), 'd MMM, h:mm a')}</span>
