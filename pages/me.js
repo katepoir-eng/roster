@@ -54,7 +54,7 @@ export default function Me() {
     const oldLevel = profile.interest_level;
     await supabase.from('profiles').update({ interest_level: val }).eq('id', profile.id);
     if (oldLevel !== val) {
-      const { data: managers } = await supabase.from('profiles').select('id').eq('role', 'manager');
+      const { data: managers } = await supabase.from('profiles').select('id').in('role', ['manager','admin']);
       if (managers?.length) {
         const selected = INTEREST_OPTIONS.find(o => o.value === val);
         await Promise.all(managers.map(m =>
@@ -117,7 +117,7 @@ export default function Me() {
 
   if (loading || !profile) return <div className="spinner" />;
 
-  const isReallyManager = realProfile?.role === 'manager';
+  const isReallyManager = ['manager','admin'].includes(realProfile?.role);
   const unreadCount = notifications.filter(n => !n.read).length;
 
   return (
