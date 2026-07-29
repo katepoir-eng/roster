@@ -18,7 +18,7 @@ export default function BottomNav() {
 
     const lastVisit = localStorage.getItem('noticeboard_last_visit') || '1970-01-01';
     supabase.from('threads').select('id', { count: 'exact' })
-      .gt('created_at', lastVisit).neq('created_by', profile.id)
+      .gt('created_at', lastVisit).neq('author_id', profile.id)
       .then(({ count: tc }) => {
         supabase.from('thread_replies').select('id', { count: 'exact' })
           .gt('created_at', lastVisit).neq('author_id', profile.id)
