@@ -80,7 +80,7 @@ export default function Availability() {
 
     // Send ONE grouped notification to managers
     if (added.length > 0 || removed.length > 0) {
-      const { data: managers } = await supabase.from('profiles').select('id').eq('role', 'manager');
+      const { data: managers } = await supabase.from('profiles').select('id').in('role', ['manager','admin']);
       if (managers?.length) {
         const parts = [];
         if (added.length > 0) {
