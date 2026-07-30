@@ -2,6 +2,7 @@ import { useAuth } from '../context/AuthContext';
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { announceUnreadChanged, countUnread, applyAppBadge, badgeSupported, notificationPermission, askForNotificationPermission } from '../lib/unread';
 import BottomNav from '../components/BottomNav';
 import { format, parseISO } from 'date-fns';
 
@@ -26,6 +27,8 @@ export default function Me() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
   const [passwordMsg, setPasswordMsg] = useState({ text: '', error: false });
+  const [badgePermission, setBadgePermission] = useState('default');
+  const [badgeMsg, setBadgeMsg] = useState('');
 
   useEffect(() => {
     if (!loading && !profile) router.replace('/');
@@ -46,6 +49,7 @@ export default function Me() {
     setNotifications(data || []);
     await supabase.from('notifications').update({ read: true })
       .eq('user_id', profile.id).eq('read', false);
+  announceUnreadChanged();
   }
 
   async function saveInterest(val) {
@@ -101,6 +105,29 @@ export default function Me() {
       setConfirmPassword('');
       setPasswordMsg({ text: '✓ Password updated successfully!', error: false });
       setTimeout(() => setPasswordMsg({ text: '', error: false }), 3000);
+    }
+  }
+
+  useEffect(() => {
+    setBadgePermission(notificationPermission());
+  }, []);
+
+  async function enableHomeScreenAlerts() {
+    setBadgeMsg('');
+    const result = await askForNotificationPermission();
+    setBadgePermission(result);
+    if (result === 'granted') {
+      const c = await countUnread(profile);
+      await applyAppBadge(c.total);
+      setBadgeMsg(c.total > 0
+        ? '✓ On — ' + c.total + ' waiting for you right now'
+        : '✓ On — the dot will appear as soon as something new arrives');
+    } else if (result === 'denied') {
+      setBadgeMsg('Blocked. iPhone: Settings → Notifications → Roster → Allow Notifications. Android: long-press the icon → App info → Notifications.');
+    } else if (result === 'unsupported') {
+      setBadgeMsg('Add the app to your home screen first, then open it from there and try again.');
+    } else {
+      setBadgeMsg('Not turned on yet — tap the button and choose Allow.');
     }
   }
 
@@ -286,6 +313,30 @@ export default function Me() {
             </div>
           )}
 
+          {/* Home screen alerts */}
+          <div className="card" style={{ marginBottom: '1rem' }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: '0.6rem' }}>Home Screen Alerts</div>
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-dim)', lineHeight: 1.5, marginBottom: '0.8rem' }}>
+              Puts a green dot on the Roster icon on your home screen whenever a new alert or noticeboard post is waiting.
+            </p>
+            {badgePermission === 'granted' ? (
+              <div style={{ fontSize: '0.88rem', color: 'var(--accent)', fontWeight: 700 }}>✓ Turned on</div>
+            ) : (
+              <button className="btn btn-ghost btn-full" onClick={enableHomeScreenAlerts}
+                style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+                🔔 Turn on home screen alerts
+              </button>
+            )}
+            {badgeMsg && (
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginTop: '0.6rem', lineHeight: 1.5 }}>{badgeMsg}</p>
+            )}
+            {!badgeSupported() && (
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginTop: '0.6rem' }}>
+                The dot only shows once the app has been added to your home screen and opened from there.
+              </p>
+            )}
+          </div>
+          
           {/* Install App */}
           <div className="card" style={{ marginBottom: '1rem' }}>
             <div style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: '0.6rem' }}>Install App</div>
