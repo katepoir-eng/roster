@@ -2,6 +2,7 @@ import Head from 'next/head';
 import { useEffect } from 'react';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import MarketBanner from '../components/MarketBanner';
 import '../styles/globals.css';
 
 // Sets a badge on the installed PWA home-screen icon when there are
@@ -75,6 +76,7 @@ export default function App({ Component, pageProps }) {
         <title>RosterApp</title>
       </Head>
       <AppBadgeManager />
+      <MarketBanner />
       <Component {...pageProps} />
     </AuthProvider>
   );
