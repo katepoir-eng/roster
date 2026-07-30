@@ -2,60 +2,67 @@ import Head from 'next/head';
 import { useEffect } from 'react';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { countUnread, applyAppBadge, UNREAD_EVENT } from '../lib/unread';
 import MarketBanner from '../components/MarketBanner';
 import '../styles/globals.css';
 
-// Sets a badge on the installed PWA home-screen icon when there are
-// unread notifications, and clears it when there are none.
+// Puts a badge on the installed PWA home screen icon whenever there is
+// something new for this user (unread alerts or unseen noticeboard posts),
+// and clears it again once they have caught up.
 function AppBadgeManager() {
   const { profile } = useAuth();
 
   useEffect(() => {
-    if (typeof navigator === 'undefined') return;
-    if (!('setAppBadge' in navigator)) return;
-
     let cancelled = false;
 
     async function refreshBadge() {
       if (!profile) {
-        try { await navigator.clearAppBadge?.(); } catch (e) {}
+        await applyAppBadge(0);
         return;
       }
-      const { count } = await supabase
-        .from('notifications')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', profile.id)
-        .eq('read', false);
+      const counts = await countUnread(profile);
       if (cancelled) return;
-      try {
-        if (count && count > 0) await navigator.setAppBadge(count);
-        else await navigator.clearAppBadge?.();
-      } catch (e) {}
+      await applyAppBadge(counts.total);
     }
 
     refreshBadge();
 
-    const onVisible = () => { if (document.visibilityState === 'visible') refreshBadge(); };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshBadge();
+    };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', refreshBadge);
+    window.addEventListener(UNREAD_EVENT, refreshBadge);
+    const timer = setInterval(refreshBadge, 60000);
 
-    let channel;
+    const channels = [];
     if (profile) {
-      channel = supabase
-        .channel('badge-notifications-' + profile.id)
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'notifications', filter: 'user_id=eq.' + profile.id },
-          refreshBadge
-        )
-        .subscribe();
+      channels.push(
+        supabase
+          .channel('badge-alerts-' + profile.id)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'notifications', filter: 'user_id=eq.' + profile.id },
+            refreshBadge
+          )
+          .subscribe()
+      );
+      channels.push(
+        supabase
+          .channel('badge-board-' + profile.id)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'threads' }, refreshBadge)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'thread_replies' }, refreshBadge)
+          .subscribe()
+      );
     }
 
     return () => {
       cancelled = true;
+      clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', refreshBadge);
-      if (channel) supabase.removeChannel(channel);
+      window.removeEventListener(UNREAD_EVENT, refreshBadge);
+      channels.forEach((c) => supabase.removeChannel(c));
     };
   }, [profile]);
 
