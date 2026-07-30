@@ -66,6 +66,7 @@ export default function Profile() {
 
   // Use realProfile to check actual role (staffViewMode spoofs role)
   const isReallyManager = ['manager','admin'].includes(realProfile?.role);
+  const isAdmin = realProfile?.role === 'admin';
 
   return (
     <div className="container page-content" style={{ paddingTop: staffViewMode ? '3rem' : undefined }}>
@@ -85,7 +86,7 @@ export default function Profile() {
         </div>
         <div style={{ fontWeight: 800, fontSize: '1.3rem' }}>{profile.full_name}</div>
         <div style={{ color: 'var(--text-dim)', marginTop: '0.3rem', textTransform: 'capitalize', fontSize: '0.9rem' }}>
-          {isReallyManager ? '⭐ Manager' : '👤 Staff'}
+          {isAdmin ? '👑 Super Admin' : isReallyManager ? '⭐ Manager' : '👤 Staff'}
         </div>
       </div>
 
