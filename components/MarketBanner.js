@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useAuth } from '../context/AuthContext';
 
 // This build talks to the Duncan database only, so the market is fixed here.
 // (Cedar's build reads the same banner out of its markets table.)
@@ -11,7 +10,6 @@ const MARKET = {
 };
 
 export default function MarketBanner() {
-  const { profile } = useAuth();
   const [logoBroken, setLogoBroken] = useState(false);
 
   // Retheme the app in the market's colour.
@@ -21,8 +19,6 @@ export default function MarketBanner() {
     root.style.setProperty('--accent', MARKET.primary);
     root.style.setProperty('--accent-dim', MARKET.secondary);
   }, []);
-
-  if (!profile) return null;
 
   return (
     <div className="market-banner" style={{ background: MARKET.primary, borderBottom: '3px solid ' + MARKET.secondary }}>
