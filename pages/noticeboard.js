@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { markBoardSeen } from '../lib/unread';
 import BottomNav from '../components/BottomNav';
 import { format } from 'date-fns';
 
@@ -39,7 +40,7 @@ export default function Noticeboard() {
     fetchThreads();
     fetchTeamStatus();
     fetchAllProfiles();
-    localStorage.setItem('noticeboard_last_visit', new Date().toISOString());
+    markBoardSeen();
   }, [profile]);
 
   async function fetchThreads() {
