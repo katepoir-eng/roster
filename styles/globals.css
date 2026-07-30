@@ -344,15 +344,20 @@ input:focus, select:focus, textarea:focus {
 }
 
 .market-banner-logo {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
   object-fit: contain;
-  background: rgba(255,255,255,0.2);
+  padding: 2px;
+  box-sizing: border-box;
+  /* the real market logo is artwork on white, so sit it on a white chip */
+  background: #fff;
   flex-shrink: 0;
 }
 
 .market-banner-fallback {
+  /* no logo file yet: plain letter on the banner colour */
+  background: rgba(255,255,255,0.2);
   display: flex;
   align-items: center;
   justify-content: center;
