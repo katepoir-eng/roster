@@ -3,31 +3,40 @@ import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { countUnread, UNREAD_EVENT } from '../lib/unread';
 
 export default function BottomNav() {
   const router = useRouter();
   const { profile, realProfile, staffViewMode, setStaffViewMode } = useAuth();
-  const [unread, setUnread] = useState(0);
-  const [unreadThreads, setUnreadThreads] = useState(0);
+  const [counts, setCounts] = useState({ alerts: 0, board: 0, total: 0 });
 
   useEffect(() => {
-    if (!profile) return;
-    supabase.from('notifications').select('id', { count: 'exact' })
-      .eq('user_id', profile.id).eq('read', false)
-      .then(({ count }) => setUnread(count || 0));
-
-    const lastVisit = localStorage.getItem('noticeboard_last_visit') || '1970-01-01';
-    supabase.from('threads').select('id', { count: 'exact' })
-      .gt('created_at', lastVisit).neq('author_id', profile.id)
-      .then(({ count: tc }) => {
-        supabase.from('thread_replies').select('id', { count: 'exact' })
-          .gt('created_at', lastVisit).neq('author_id', profile.id)
-          .then(({ count: rc }) => setUnreadThreads((tc || 0) + (rc || 0)));
-      });
+    if (!profile) { setCounts({ alerts: 0, board: 0, total: 0 }); return; }
+    let cancelled = false;
+    const refresh = async () => {
+      const c = await countUnread(profile);
+      if (!cancelled) setCounts(c);
+    };
+    refresh();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', refresh);
+    window.addEventListener(UNREAD_EVENT, refresh);
+    const timer = setInterval(refresh, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener(UNREAD_EVENT, refresh);
+    };
   }, [profile]);
 
   const isActive = (path) => router.pathname === path;
-  const totalBadge = unread + unreadThreads;
+  const unreadThreads = counts.board;
+  const totalBadge = counts.total;
 
   // Staff view mode banner + staff nav
   if (staffViewMode && ['manager','admin'].includes(realProfile?.role)) {
